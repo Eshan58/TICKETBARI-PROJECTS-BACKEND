@@ -6,689 +6,913 @@
 // const bodyParser = require("body-parser");
 // const fs = require("fs");
 // const path = require("path");
+// const jwt = require("jsonwebtoken");
 
 // const app = express();
-// app.use(cors());
-// app.use(bodyParser.json());
 
-// // Fix Mongoose deprecation warning
-// mongoose.set("strictQuery", false);
-
-// // ---------- Load Firebase Admin from JSON file ----------
-// const serviceAccountPath = path.join(
-//   __dirname,
-//   "ticketbari-projects-firebase-adminsdk-fbsvc-1d8b29239b.json"
+// // Better CORS setup
+// app.use(
+//   cors({
+//     origin: ["http://localhost:3000", "http://localhost:5173"],
+//     credentials: true,
+//   })
 // );
 
-// if (!fs.existsSync(serviceAccountPath)) {
-//   console.error(
-//     "Firebase service account JSON file not found at:",
-//     serviceAccountPath
-//   );
-//   console.error(
-//     "Please ensure the JSON file is in the same directory as server.js"
-//   );
-//   process.exit(1);
-// }
+// // Body parser
+// app.use(bodyParser.json());
 
-// try {
-//   const serviceAccount = require(serviceAccountPath);
-//   admin.initializeApp({
-//     credential: admin.credential.cert(serviceAccount),
-//   });
-//   console.log("✅ Firebase Admin initialized successfully");
-// } catch (error) {
-//   console.error("❌ Failed to initialize Firebase Admin:", error.message);
-//   process.exit(1);
-// }
+// // Add request logging
+// app.use((req, res, next) => {
+//   console.log(`${req.method} ${req.url} - ${new Date().toISOString()}`);
+//   next();
+// });
 
-// // ---------- MongoDB Atlas Connection ----------
+// // ---------- MongoDB Connection ----------
+// mongoose.set("strictQuery", false);
 // const MONGO_URI = process.env.MONGO_URI;
-// if (!MONGO_URI) {
-//   console.error("❌ MONGO_URI not set in .env file");
-//   process.exit(1);
-// }
-
-// console.log("🔗 Connecting to MongoDB Atlas...");
 
 // mongoose
 //   .connect(MONGO_URI, {
 //     useNewUrlParser: true,
 //     useUnifiedTopology: true,
-//     serverSelectionTimeoutMS: 10000, // 10 seconds
-//     socketTimeoutMS: 45000,
 //   })
 //   .then(() => {
-//     console.log("✅ MongoDB Atlas connected successfully!");
-//     console.log(`📊 Database: ${mongoose.connection.name}`);
+//     console.log("✅ MongoDB Connected Successfully");
 //   })
 //   .catch((err) => {
-//     console.error("❌ MongoDB Atlas connection error:", err.message);
-//     console.log("⚠️ Starting server without MongoDB - using mock data");
+//     console.error("❌ MongoDB connection failed:", err.message);
 //   });
+
+// // ---------- Firebase Admin ----------
+// let firebaseApp;
+// try {
+//   const serviceAccountPath = path.join(
+//     __dirname,
+//     "ticketbari-projects-firebase-adminsdk-fbsvc-1d8b29239b.json"
+//   );
+
+//   if (!fs.existsSync(serviceAccountPath)) {
+//     throw new Error("Firebase service account file not found!");
+//   }
+
+//   const serviceAccount = require(serviceAccountPath);
+//   firebaseApp = admin.initializeApp({
+//     credential: admin.credential.cert(serviceAccount),
+//   });
+//   console.log("✅ Firebase Admin initialized");
+// } catch (error) {
+//   console.error("❌ Firebase Admin Error:", error.message);
+//   console.log("Running without Firebase (JWT only mode)");
+//   firebaseApp = null;
+// }
 
 // // ---------- Mongoose Schemas ----------
 // const { Schema } = mongoose;
 
-// const UserSchema = new Schema({
-//   uid: { type: String, required: true, unique: true },
-//   name: String,
-//   email: { type: String, required: true },
-//   photoURL: String,
-//   role: { type: String, enum: ["user", "vendor", "admin"], default: "user" },
-//   createdAt: { type: Date, default: Date.now },
-// });
-// const User = mongoose.model("User", UserSchema);
-
-// const TicketSchema = new Schema({
-//   title: { type: String, required: true },
-//   from: { type: String, required: true },
-//   to: { type: String, required: true },
-//   transportType: {
-//     type: String,
-//     enum: ["bus", "train", "launch", "plane"],
-//     required: true,
+// const userSchema = new Schema(
+//   {
+//     uid: { type: String, required: true, unique: true, index: true },
+//     name: String,
+//     email: { type: String, required: true, lowercase: true, trim: true },
+//     photoURL: String,
+//     role: {
+//       type: String,
+//       enum: ["user", "vendor", "admin"],
+//       default: "user",
+//       index: true,
+//     },
+//     createdAt: { type: Date, default: Date.now },
+//     updatedAt: { type: Date, default: Date.now },
 //   },
-//   price: { type: Number, required: true, min: 0 },
-//   quantity: { type: Number, required: true, min: 0 },
-//   perks: [String],
-//   image: String,
-//   departureAt: { type: Date, required: true },
-//   vendorId: { type: String, required: true },
-//   vendorName: String,
-//   verified: {
-//     type: String,
-//     enum: ["pending", "approved", "rejected"],
-//     default: "pending",
-//   },
-//   advertised: { type: Boolean, default: false },
-//   createdAt: { type: Date, default: Date.now },
-// });
-// const Ticket = mongoose.model("Ticket", TicketSchema);
-
-// const BookingSchema = new Schema({
-//   userId: { type: String, required: true },
-//   userName: String,
-//   userEmail: String,
-//   ticketId: { type: String, required: true },
-//   ticketTitle: String,
-//   quantity: { type: Number, required: true, min: 1 },
-//   totalPrice: { type: Number, required: true, min: 0 },
-//   status: {
-//     type: String,
-//     enum: ["pending", "accepted", "rejected", "paid"],
-//     default: "pending",
-//   },
-//   createdAt: { type: Date, default: Date.now },
-// });
-// const Booking = mongoose.model("Booking", BookingSchema);
-
-// const TransactionSchema = new Schema({
-//   bookingId: { type: String, required: true },
-//   transactionId: { type: String, required: true },
-//   amount: { type: Number, required: true, min: 0 },
-//   ticketTitle: String,
-//   userId: { type: String, required: true },
-//   createdAt: { type: Date, default: Date.now },
-// });
-// const Transaction = mongoose.model("Transaction", TransactionSchema);
-
-// // ---------- Middleware to verify Firebase ID token ----------
-// async function verifyFirebaseToken(req, res, next) {
-//   const authHeader = req.headers.authorization;
-//   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-//     return res
-//       .status(401)
-//       .json({ message: "Unauthorized - No token provided" });
+//   {
+//     timestamps: true,
 //   }
-//   const idToken = authHeader.split("Bearer ")[1];
-//   try {
-//     const decoded = await admin.auth().verifyIdToken(idToken);
+// );
 
-//     // Upsert user in DB if MongoDB is connected
-//     if (mongoose.connection.readyState === 1) {
-//       try {
-//         await User.findOneAndUpdate(
-//           { uid: decoded.uid },
-//           {
-//             uid: decoded.uid,
-//             name: decoded.name || "",
-//             email: decoded.email,
-//             photoURL: decoded.picture || "",
-//           },
-//           { upsert: true, new: true }
-//         );
-//       } catch (dbError) {
-//         console.warn("Database user upsert failed:", dbError.message);
+// const ticketSchema = new Schema(
+//   {
+//     title: { type: String, required: true, trim: true },
+//     from: { type: String, required: true, trim: true },
+//     to: { type: String, required: true, trim: true },
+//     transportType: {
+//       type: String,
+//       enum: ["bus", "train", "launch", "plane"],
+//       required: true,
+//       index: true,
+//     },
+//     price: { type: Number, required: true, min: 0 },
+//     quantity: { type: Number, required: true, min: 0 },
+//     availableQuantity: {
+//       type: Number,
+//       default: function () {
+//         return this.quantity;
+//       },
+//     },
+//     perks: [String],
+//     image: {
+//       type: String,
+//       default:
+//         "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=500&auto=format&fit=crop",
+//     },
+//     departureAt: { type: Date, required: true, index: true },
+//     arrivalAt: Date,
+//     vendorId: { type: String, required: true, index: true },
+//     vendorName: String,
+//     verified: {
+//       type: String,
+//       enum: ["pending", "approved", "rejected"],
+//       default: "pending",
+//       index: true,
+//     },
+//     advertised: { type: Boolean, default: false, index: true },
+//     description: String,
+//     isActive: { type: Boolean, default: true }, // FIXED: Default should be true
+//   },
+//   {
+//     timestamps: true,
+//   }
+// );
+
+// const bookingSchema = new Schema(
+//   {
+//     userId: { type: String, required: true, index: true },
+//     userName: String,
+//     userEmail: String,
+//     ticketId: {
+//       type: Schema.Types.ObjectId,
+//       ref: "Ticket",
+//       required: true,
+//       index: true,
+//     },
+//     ticketTitle: String,
+//     quantity: { type: Number, required: true, min: 1 },
+//     totalPrice: { type: Number, required: true, min: 0 },
+//     status: {
+//       type: String,
+//       enum: ["pending", "confirmed", "cancelled", "completed"],
+//       default: "pending",
+//       index: true,
+//     },
+//     bookingDate: { type: Date, default: Date.now },
+//     paymentStatus: {
+//       type: String,
+//       enum: ["pending", "paid", "refunded"],
+//       default: "pending",
+//       index: true,
+//     },
+//     bookingReference: { type: String, unique: true },
+//   },
+//   {
+//     timestamps: true,
+//   }
+// );
+
+// bookingSchema.pre("save", function (next) {
+//   if (!this.bookingReference) {
+//     this.bookingReference =
+//       "TB-" +
+//       Date.now() +
+//       "-" +
+//       Math.random().toString(36).substr(2, 9).toUpperCase();
+//   }
+//   next();
+// });
+
+// const User = mongoose.model("User", userSchema);
+// const Ticket = mongoose.model("Ticket", ticketSchema);
+// const Booking = mongoose.model("Booking", bookingSchema);
+
+// // ---------- Validation Helper ----------
+// const validateRequest = (req, res, next) => {
+//   const errors = [];
+
+//   if (req.body.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.email)) {
+//     errors.push("Invalid email format");
+//   }
+
+//   if (req.body.price && req.body.price < 0) {
+//     errors.push("Price cannot be negative");
+//   }
+
+//   if (errors.length > 0) {
+//     return res.status(400).json({
+//       success: false,
+//       message: "Validation failed",
+//       errors,
+//     });
+//   }
+
+//   next();
+// };
+
+// // ---------- Auth Middleware ----------
+// async function universalAuthMiddleware(req, res, next) {
+//   const authHeader = req.headers.authorization;
+
+//   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+//     return res.status(401).json({
+//       success: false,
+//       message: "No token provided. Please login first.",
+//     });
+//   }
+
+//   const token = authHeader.split(" ")[1];
+
+//   try {
+//     if (firebaseApp) {
+//       const decoded = await admin.auth().verifyIdToken(token);
+//       req.user = decoded;
+//       req.authType = "firebase";
+
+//       const mongoUser = await User.findOneAndUpdate(
+//         { uid: decoded.uid },
+//         {
+//           uid: decoded.uid,
+//           name: decoded.name || decoded.email?.split("@")[0] || "User",
+//           email: decoded.email,
+//           photoURL: decoded.picture || "",
+//           updatedAt: new Date(),
+//         },
+//         {
+//           upsert: true,
+//           new: true,
+//           setDefaultsOnInsert: true,
+//         }
+//       );
+
+//       req.mongoUser = mongoUser;
+//     } else {
+//       const decoded = jwt.verify(
+//         token,
+//         process.env.JWT_SECRET || "your-secret-key-change-in-production"
+//       );
+//       const user = await User.findById(decoded.id);
+//       if (!user) {
+//         return res.status(401).json({
+//           success: false,
+//           message: "User not found. Please login again.",
+//         });
 //       }
+//       req.mongoUser = user;
+//       req.user = user;
+//       req.authType = "jwt";
 //     }
 
-//     req.user = decoded;
 //     next();
 //   } catch (err) {
-//     console.error("Token verification failed:", err.message);
-//     res.status(401).json({ message: "Invalid or expired token" });
+//     console.error("🔴 Auth Error:", err.message);
+
+//     if (err.name === "TokenExpiredError") {
+//       return res.status(401).json({
+//         success: false,
+//         message: "Token expired. Please login again.",
+//       });
+//     }
+
+//     res.status(401).json({
+//       success: false,
+//       message: "Authentication failed. Please login again.",
+//     });
 //   }
 // }
 
-// // ---------- Utility: role-based middleware ----------
-// const requireRole = (role) => async (req, res, next) => {
-//   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-
-//   if (mongoose.connection.readyState !== 1) {
-//     console.warn("MongoDB not connected, skipping role check");
-//     return next();
-//   }
-
-//   try {
-//     const dbUser = await User.findOne({ uid: req.user.uid });
-//     if (!dbUser || dbUser.role !== role) {
-//       return res
-//         .status(403)
-//         .json({ message: "Forbidden - Insufficient permissions" });
+// // ---------- Role Middleware ----------
+// const requireRole = (roles) => {
+//   return (req, res, next) => {
+//     if (!req.mongoUser) {
+//       return res.status(401).json({
+//         success: false,
+//         message: "Authentication required",
+//       });
 //     }
+
+//     if (!roles.includes(req.mongoUser.role)) {
+//       return res.status(403).json({
+//         success: false,
+//         message: `Access denied. Required roles: ${roles.join(", ")}`,
+//       });
+//     }
+
 //     next();
-//   } catch (error) {
-//     console.error("Role check failed:", error.message);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
+//   };
 // };
 
-// // ---------- Health Check Route ----------
+// // ---------- Error Handler ----------
+// const errorHandler = (err, req, res, next) => {
+//   console.error("🔥 Server Error:", err.message);
+
+//   if (err.code === 11000) {
+//     return res.status(409).json({
+//       success: false,
+//       message: "Duplicate entry found",
+//       field: Object.keys(err.keyPattern)[0],
+//     });
+//   }
+
+//   if (err.name === "ValidationError") {
+//     const errors = Object.values(err.errors).map((e) => e.message);
+//     return res.status(400).json({
+//       success: false,
+//       message: "Validation Error",
+//       errors,
+//     });
+//   }
+
+//   if (err.name === "JsonWebTokenError") {
+//     return res.status(401).json({
+//       success: false,
+//       message: "Invalid token",
+//     });
+//   }
+
+//   res.status(500).json({
+//     success: false,
+//     message: "Internal server error",
+//   });
+// };
+
+// // ---------- Public Routes ----------
 // app.get("/", (req, res) => {
 //   res.json({
-//     status: "ok",
-//     service: "TicketBari Backend API",
+//     success: true,
+//     message: "🎫 TicketBari API is running smoothly!",
 //     version: "1.0.0",
-//     mongodb:
-//       mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-//     firebase: "initialized",
-//     timestamp: new Date().toISOString(),
+//     note: "If tickets are not showing, check /api/debug/tickets to see database contents",
 //   });
 // });
 
-// // ---------- Public Routes ----------
-
-// // Get advertised tickets (with mock data fallback)
-// app.get("/api/advertised", async (req, res) => {
-//   if (mongoose.connection.readyState !== 1) {
-//     console.log("⚠️ Using mock advertised data (MongoDB not connected)");
-//     return res.json([
-//       {
-//         _id: "1",
-//         title: "Express Bus to Cox's Bazar",
-//         from: "Dhaka",
-//         to: "Cox's Bazar",
-//         price: 1200,
-//         image:
-//           "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=500&auto=format&fit=crop",
-//         transportType: "bus",
-//         departureAt: new Date(Date.now() + 86400000 * 2).toISOString(),
-//         quantity: 15,
-//       },
-//       {
-//         _id: "2",
-//         title: "Sundarban Tour Launch",
-//         from: "Khulna",
-//         to: "Sundarban",
-//         price: 2500,
-//         image:
-//           "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=500&auto=format&fit=crop",
-//         transportType: "launch",
-//         departureAt: new Date(Date.now() + 86400000 * 3).toISOString(),
-//         quantity: 8,
-//       },
-//       {
-//         _id: "3",
-//         title: "Intercity Train to Sylhet",
-//         from: "Dhaka",
-//         to: "Sylhet",
-//         price: 800,
-//         image:
-//           "https://images.unsplash.com/photo-1516053256215-940222132676?w=500&auto=format&fit=crop",
-//         transportType: "train",
-//         departureAt: new Date(Date.now() + 86400000).toISOString(),
-//         quantity: 20,
-//       },
-//     ]);
-//   }
-
-//   try {
-//     const advertisedTickets = await Ticket.find({
-//       verified: "approved",
-//       advertised: true,
-//       departureAt: { $gt: new Date() },
-//       quantity: { $gt: 0 },
-//     })
-//       .limit(6)
-//       .sort({ createdAt: -1 });
-
-//     res.json(advertisedTickets);
-//   } catch (error) {
-//     console.error("Error fetching advertised tickets:", error);
-//     res.status(500).json({ message: "Failed to fetch advertised tickets" });
-//   }
-// });
-
-// // Get all tickets with pagination and filtering
-// app.get("/api/tickets", async (req, res) => {
-//   const page = parseInt(req.query.page) || 1;
-//   const limit = parseInt(req.query.limit) || 8;
-//   const transport = req.query.transport;
-//   const from = req.query.from;
-//   const to = req.query.to;
-//   const sort = req.query.sort;
-//   const minPrice = parseFloat(req.query.minPrice);
-//   const maxPrice = parseFloat(req.query.maxPrice);
-
-//   // Build filter
-//   const filter = {
-//     verified: "approved",
-//     departureAt: { $gt: new Date() },
-//     quantity: { $gt: 0 },
+// app.get("/api/health", async (req, res) => {
+//   const health = {
+//     status: "healthy",
+//     timestamp: new Date().toISOString(),
+//     database:
+//       mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+//     firebase: firebaseApp ? "connected" : "not configured",
 //   };
 
-//   if (transport && ["bus", "train", "launch", "plane"].includes(transport)) {
-//     filter.transportType = transport;
-//   }
-//   if (from) filter.from = { $regex: from, $options: "i" };
-//   if (to) filter.to = { $regex: to, $options: "i" };
-//   if (!isNaN(minPrice)) filter.price = { $gte: minPrice };
-//   if (!isNaN(maxPrice)) {
-//     filter.price = filter.price || {};
-//     filter.price.$lte = maxPrice;
-//   }
+//   res.json({ success: true, data: health });
+// });
 
-//   if (mongoose.connection.readyState !== 1) {
-//     console.log("⚠️ Using mock tickets data (MongoDB not connected)");
-//     return res.json({
-//       total: 0,
-//       page,
-//       limit,
-//       tickets: [],
-//     });
-//   }
-
+// // ---------- DEBUG ENDPOINTS ----------
+// app.get("/api/debug/tickets", async (req, res) => {
 //   try {
-//     let query = Ticket.find(filter);
-
-//     // Sorting
-//     if (sort === "price_asc") query = query.sort({ price: 1 });
-//     else if (sort === "price_desc") query = query.sort({ price: -1 });
-//     else if (sort === "departure_asc") query = query.sort({ departureAt: 1 });
-//     else query = query.sort({ createdAt: -1 });
-
-//     const total = await Ticket.countDocuments(filter);
-//     const tickets = await query.skip((page - 1) * limit).limit(limit);
+//     const allTickets = await Ticket.find({});
+//     const approvedTickets = await Ticket.find({ verified: "approved" });
+//     const pendingTickets = await Ticket.find({ verified: "pending" });
+//     const activeTickets = await Ticket.find({ isActive: true });
+//     const approvedActive = await Ticket.find({
+//       verified: "approved",
+//       isActive: true,
+//     });
+//     const futureTickets = await Ticket.find({
+//       departureAt: { $gte: new Date() },
+//     });
+//     const approvedActiveFuture = await Ticket.find({
+//       verified: "approved",
+//       isActive: true,
+//       departureAt: { $gte: new Date() },
+//     });
 
 //     res.json({
-//       total,
-//       page,
-//       limit,
-//       totalPages: Math.ceil(total / limit),
-//       tickets,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching tickets:", error);
-//     res.status(500).json({ message: "Failed to fetch tickets" });
-//   }
-// });
-
-// // Get single ticket details
-// app.get("/api/tickets/:id", async (req, res) => {
-//   const { id } = req.params;
-
-//   if (mongoose.connection.readyState !== 1) {
-//     return res
-//       .status(404)
-//       .json({ message: "Ticket not found (Database not connected)" });
-//   }
-
-//   try {
-//     const ticket = await Ticket.findById(id);
-//     if (!ticket) {
-//       return res.status(404).json({ message: "Ticket not found" });
-//     }
-//     res.json(ticket);
-//   } catch (error) {
-//     console.error("Error fetching ticket:", error);
-//     res.status(500).json({ message: "Failed to fetch ticket details" });
-//   }
-// });
-
-// // ---------- Protected Routes (Require Authentication) ----------
-
-// // Create a booking
-// app.post("/api/bookings", verifyFirebaseToken, async (req, res) => {
-//   const { ticketId, quantity } = req.body;
-
-//   if (!ticketId || !quantity || quantity < 1) {
-//     return res
-//       .status(400)
-//       .json({ message: "Ticket ID and quantity (minimum 1) are required" });
-//   }
-
-//   if (mongoose.connection.readyState !== 1) {
-//     return res
-//       .status(503)
-//       .json({ message: "Database not available. Please try again later." });
-//   }
-
-//   try {
-//     const ticket = await Ticket.findById(ticketId);
-//     if (!ticket) {
-//       return res.status(404).json({ message: "Ticket not found" });
-//     }
-
-//     if (ticket.verified !== "approved") {
-//       return res
-//         .status(400)
-//         .json({ message: "This ticket is not approved for booking" });
-//     }
-
-//     if (new Date(ticket.departureAt) <= new Date()) {
-//       return res
-//         .status(400)
-//         .json({ message: "This ticket has already departed" });
-//     }
-
-//     if (ticket.quantity < quantity) {
-//       return res.status(400).json({
-//         message: `Only ${ticket.quantity} tickets available`,
-//         available: ticket.quantity,
-//       });
-//     }
-
-//     // Calculate total price
-//     const totalPrice = ticket.price * quantity;
-
-//     // Create booking
-//     const booking = new Booking({
-//       userId: req.user.uid,
-//       userName: req.user.name || req.user.email,
-//       userEmail: req.user.email,
-//       ticketId,
-//       ticketTitle: ticket.title,
-//       quantity,
-//       totalPrice,
-//       status: "pending",
-//     });
-
-//     await booking.save();
-
-//     res.status(201).json({
-//       message: "Booking created successfully",
-//       booking,
-//       ticket: {
-//         title: ticket.title,
-//         from: ticket.from,
-//         to: ticket.to,
-//         departureAt: ticket.departureAt,
+//       success: true,
+//       data: {
+//         totalTickets: allTickets.length,
+//         approvedTickets: approvedTickets.length,
+//         pendingTickets: pendingTickets.length,
+//         activeTickets: activeTickets.length,
+//         approvedActive: approvedActive.length,
+//         futureTickets: futureTickets.length,
+//         approvedActiveFuture: approvedActiveFuture.length,
+//         sampleTicket: allTickets[0] || null,
+//         allTickets: allTickets.map((t) => ({
+//           _id: t._id,
+//           title: t.title,
+//           from: t.from,
+//           to: t.to,
+//           verified: t.verified,
+//           isActive: t.isActive,
+//           departureAt: t.departureAt,
+//           daysUntil: t.departureAt
+//             ? Math.floor(
+//                 (new Date(t.departureAt) - new Date()) / (1000 * 60 * 60 * 24)
+//               )
+//             : "N/A",
+//           price: t.price,
+//           transportType: t.transportType,
+//         })),
 //       },
 //     });
 //   } catch (error) {
-//     console.error("Error creating booking:", error);
-//     res.status(500).json({ message: "Failed to create booking" });
+//     console.error("Debug error:", error);
+//     res.status(500).json({ success: false, error: error.message });
 //   }
 // });
 
-// // Get user's bookings
-// app.get("/api/my-bookings", verifyFirebaseToken, async (req, res) => {
-//   if (mongoose.connection.readyState !== 1) {
-//     return res.json([]);
-//   }
-
+// // FIXED: This endpoint now approves AND activates tickets
+// app.post("/api/debug/approve-all", async (req, res) => {
 //   try {
-//     const bookings = await Booking.find({ userId: req.user.uid })
-//       .sort({ createdAt: -1 })
-//       .populate("ticketId", "title from to departureAt");
+//     const result = await Ticket.updateMany(
+//       {},
+//       {
+//         $set: {
+//           verified: "approved",
+//           isActive: true,
+//           advertised: true, // Also advertise them so they show in featured section
+//         },
+//       }
+//     );
 
-//     res.json(bookings);
+//     res.json({
+//       success: true,
+//       message: `✅ Approved and activated ${result.modifiedCount} tickets`,
+//       details: {
+//         modifiedCount: result.modifiedCount,
+//         matchedCount: result.matchedCount,
+//       },
+//     });
 //   } catch (error) {
-//     console.error("Error fetching bookings:", error);
-//     res.status(500).json({ message: "Failed to fetch bookings" });
+//     console.error("Approve error:", error);
+//     res.status(500).json({ success: false, error: error.message });
 //   }
 // });
 
-// // ---------- Vendor Routes ----------
+// // NEW: Add an endpoint to only activate approved tickets
+// app.post("/api/debug/activate-approved", async (req, res) => {
+//   try {
+//     const result = await Ticket.updateMany(
+//       { verified: "approved" },
+//       { $set: { isActive: true } }
+//     );
 
-// // Add new ticket (Vendor only)
-// app.post(
-//   "/api/tickets",
-//   verifyFirebaseToken,
-//   requireRole("vendor"),
-//   async (req, res) => {
-//     const ticketData = req.body;
+//     res.json({
+//       success: true,
+//       message: `✅ Activated ${result.modifiedCount} approved tickets`,
+//       details: {
+//         modifiedCount: result.modifiedCount,
+//         matchedCount: result.matchedCount,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Activate error:", error);
+//     res.status(500).json({ success: false, error: error.message });
+//   }
+// });
 
-//     // Validate required fields
-//     const requiredFields = [
-//       "title",
-//       "from",
-//       "to",
-//       "transportType",
-//       "price",
-//       "quantity",
-//       "departureAt",
-//     ];
-//     for (const field of requiredFields) {
-//       if (!ticketData[field]) {
-//         return res.status(400).json({ message: `${field} is required` });
-//       }
+// // ---------- ADVERTISED TICKETS ----------
+// app.get("/api/advertised", async (req, res, next) => {
+//   try {
+//     const tickets = await Ticket.find({
+//       advertised: true,
+//       verified: "approved",
+//       isActive: true,
+//     })
+//       .sort({ departureAt: 1 })
+//       .limit(6);
+
+//     res.json({
+//       success: true,
+//       data: {
+//         tickets,
+//       },
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// });
+
+// // ---------- FIXED: ALL TICKETS ENDPOINT (MAIN FIX) ----------
+// app.get("/api/tickets", async (req, res, next) => {
+//   try {
+//     const {
+//       page = 1,
+//       limit = 8,
+//       transport = "",
+//       sort = "",
+//       from,
+//       to,
+//       minPrice,
+//       maxPrice,
+//       date,
+//     } = req.query;
+
+//     const pageNum = parseInt(page);
+//     const limitNum = parseInt(limit);
+//     const skip = (pageNum - 1) * limitNum;
+
+//     console.log("📥 Tickets API Request:", req.query);
+
+//     // Build filter object - FIXED: Only show approved and active tickets
+//     const filter = {
+//       verified: "approved",
+//       isActive: true,
+//     };
+
+//     // DEBUG: Check what we have in DB
+//     console.log("🔍 DEBUG: Getting all approved, active tickets...");
+//     const allApprovedActive = await Ticket.find(filter);
+//     console.log(
+//       `🔍 DEBUG: Found ${allApprovedActive.length} approved & active tickets`
+//     );
+
+//     // Add transport filter if specified
+//     if (transport && transport !== "") {
+//       filter.transportType = transport;
+//       console.log(`🔍 DEBUG: Filtering by transport: ${transport}`);
 //     }
 
-//     if (mongoose.connection.readyState !== 1) {
-//       return res.status(503).json({ message: "Database not available" });
+//     // Add from/to filters if specified
+//     if (from && from !== "") {
+//       filter.from = new RegExp(from, "i");
 //     }
 
+//     if (to && to !== "") {
+//       filter.to = new RegExp(to, "i");
+//     }
+
+//     // Price range filters
+//     if (minPrice || maxPrice) {
+//       filter.price = {};
+//       if (minPrice) filter.price.$gte = Number(minPrice);
+//       if (maxPrice) filter.price.$lte = Number(maxPrice);
+//     }
+
+//     // REMOVE departure date filter to show ALL tickets regardless of date
+//     // This is the main fix - your tickets likely have past dates
+//     // If you want to filter by date in the future, uncomment the line below:
+//     // filter.departureAt = { $gte: new Date() };
+
+//     // Only add departure filter if date is provided
+//     if (date && date !== "") {
+//       const startDate = new Date(date);
+//       startDate.setHours(0, 0, 0, 0);
+//       const endDate = new Date(date);
+//       endDate.setHours(23, 59, 59, 999);
+//       filter.departureAt = { $gte: startDate, $lte: endDate };
+//     }
+
+//     console.log("🔍 Final MongoDB Filter:", JSON.stringify(filter, null, 2));
+
+//     // Build sort object
+//     let sortOption = { createdAt: -1 }; // Default: newest first
+
+//     if (sort === "price_asc") {
+//       sortOption = { price: 1 };
+//     } else if (sort === "price_desc") {
+//       sortOption = { price: -1 };
+//     }
+
+//     // Execute queries
+//     const [tickets, total] = await Promise.all([
+//       Ticket.find(filter).sort(sortOption).skip(skip).limit(limitNum),
+//       Ticket.countDocuments(filter),
+//     ]);
+
+//     console.log(
+//       `✅ FINAL: Found ${tickets.length} tickets out of ${total} total`
+//     );
+
+//     if (tickets.length > 0) {
+//       console.log(
+//         "✅ Sample tickets:",
+//         tickets.slice(0, 2).map((t) => ({
+//           title: t.title,
+//           verified: t.verified,
+//           isActive: t.isActive,
+//           departureAt: t.departureAt,
+//           price: t.price,
+//           transportType: t.transportType,
+//         }))
+//       );
+//     }
+
+//     res.json({
+//       success: true,
+//       data: {
+//         tickets,
+//         pagination: {
+//           page: pageNum,
+//           limit: limitNum,
+//           total,
+//           pages: Math.ceil(total / limitNum) || 0,
+//           hasNext: pageNum * limitNum < total,
+//           hasPrev: pageNum > 1,
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     console.error("❌ Error in /api/tickets:", error);
+//     next(error);
+//   }
+// });
+
+// // ---------- SINGLE TICKET ----------
+// app.get("/api/tickets/:id", async (req, res, next) => {
+//   try {
+//     const ticket = await Ticket.findById(req.params.id);
+
+//     if (!ticket) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Ticket not found",
+//       });
+//     }
+
+//     res.json({
+//       success: true,
+//       data: {
+//         ticket,
+//       },
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// });
+
+// // ---------- USER ROUTES ----------
+// app.get(
+//   "/api/my-bookings",
+//   universalAuthMiddleware,
+//   requireRole(["user"]),
+//   async (req, res, next) => {
 //     try {
-//       // Get vendor info
-//       const vendor = await User.findOne({ uid: req.user.uid });
+//       const userId = req.mongoUser.uid || req.mongoUser._id;
+//       const bookings = await Booking.find({ userId })
+//         .populate("ticketId", "title from to departureAt transportType image")
+//         .sort({ createdAt: -1 });
 
-//       const newTicket = new Ticket({
-//         ...ticketData,
-//         vendorId: req.user.uid,
-//         vendorName: vendor?.name || req.user.email,
-//         verified: "pending",
-//         advertised: false,
+//       res.json({
+//         success: true,
+//         data: {
+//           bookings,
+//         },
+//       });
+//     } catch (error) {
+//       next(error);
+//     }
+//   }
+// );
+
+// app.post(
+//   "/api/bookings",
+//   universalAuthMiddleware,
+//   requireRole(["user"]),
+//   validateRequest,
+//   async (req, res, next) => {
+//     try {
+//       const { ticketId, quantity } = req.body;
+
+//       if (!ticketId || !quantity || quantity < 1) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Ticket ID and quantity (minimum 1) are required",
+//         });
+//       }
+
+//       const ticket = await Ticket.findById(ticketId);
+//       if (!ticket) {
+//         return res.status(404).json({
+//           success: false,
+//           message: "Ticket not found",
+//         });
+//       }
+
+//       if (ticket.availableQuantity < quantity) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `Only ${ticket.availableQuantity} tickets available`,
+//         });
+//       }
+
+//       const booking = await Booking.create({
+//         userId: req.mongoUser.uid || req.mongoUser._id,
+//         userName: req.mongoUser.name || req.mongoUser.email.split("@")[0],
+//         userEmail: req.mongoUser.email,
+//         ticketId,
+//         ticketTitle: ticket.title,
+//         quantity,
+//         totalPrice: ticket.price * quantity,
+//         status: "pending",
 //       });
 
-//       await newTicket.save();
+//       // Update ticket availability
+//       ticket.availableQuantity -= quantity;
+//       await ticket.save();
 
 //       res.status(201).json({
-//         message: "Ticket submitted for approval",
-//         ticket: newTicket,
+//         success: true,
+//         message: "Booking created successfully",
+//         data: {
+//           booking,
+//         },
 //       });
 //     } catch (error) {
-//       console.error("Error creating ticket:", error);
-//       res.status(500).json({ message: "Failed to create ticket" });
+//       next(error);
 //     }
 //   }
 // );
 
-// // Get vendor's tickets
+// // ---------- VENDOR ROUTES ----------
 // app.get(
 //   "/api/vendor/tickets",
-//   verifyFirebaseToken,
-//   requireRole("vendor"),
-//   async (req, res) => {
-//     if (mongoose.connection.readyState !== 1) {
-//       return res.json([]);
-//     }
-
+//   universalAuthMiddleware,
+//   requireRole(["vendor"]),
+//   async (req, res, next) => {
 //     try {
-//       const tickets = await Ticket.find({ vendorId: req.user.uid }).sort({
-//         createdAt: -1,
-//       });
-
-//       res.json(tickets);
-//     } catch (error) {
-//       console.error("Error fetching vendor tickets:", error);
-//       res.status(500).json({ message: "Failed to fetch tickets" });
-//     }
-//   }
-// );
-
-// // ---------- Admin Routes ----------
-
-// // Get all tickets for admin approval
-// app.get(
-//   "/api/admin/tickets",
-//   verifyFirebaseToken,
-//   requireRole("admin"),
-//   async (req, res) => {
-//     if (mongoose.connection.readyState !== 1) {
-//       return res.json([]);
-//     }
-
-//     try {
-//       const tickets = await Ticket.find().sort({ createdAt: -1 });
-
-//       res.json(tickets);
-//     } catch (error) {
-//       console.error("Error fetching admin tickets:", error);
-//       res.status(500).json({ message: "Failed to fetch tickets" });
-//     }
-//   }
-// );
-
-// // Approve a ticket
-// app.patch(
-//   "/api/admin/tickets/:id/approve",
-//   verifyFirebaseToken,
-//   requireRole("admin"),
-//   async (req, res) => {
-//     const { id } = req.params;
-
-//     if (mongoose.connection.readyState !== 1) {
-//       return res.status(503).json({ message: "Database not available" });
-//     }
-
-//     try {
-//       const ticket = await Ticket.findByIdAndUpdate(
-//         id,
-//         { verified: "approved" },
-//         { new: true }
-//       );
-
-//       if (!ticket) {
-//         return res.status(404).json({ message: "Ticket not found" });
-//       }
+//       const vendorId = req.mongoUser.uid || req.mongoUser._id;
+//       const tickets = await Ticket.find({ vendorId }).sort({ createdAt: -1 });
 
 //       res.json({
-//         message: "Ticket approved successfully",
-//         ticket,
+//         success: true,
+//         data: {
+//           tickets,
+//         },
 //       });
 //     } catch (error) {
-//       console.error("Error approving ticket:", error);
-//       res.status(500).json({ message: "Failed to approve ticket" });
+//       next(error);
 //     }
 //   }
 // );
 
-// // Reject a ticket
-// app.patch(
-//   "/api/admin/tickets/:id/reject",
-//   verifyFirebaseToken,
-//   requireRole("admin"),
-//   async (req, res) => {
-//     const { id } = req.params;
-
-//     if (mongoose.connection.readyState !== 1) {
-//       return res.status(503).json({ message: "Database not available" });
-//     }
-
+// // FIXED: Vendor ticket creation - tickets should be active by default
+// app.post(
+//   "/api/vendor/tickets",
+//   universalAuthMiddleware,
+//   requireRole(["vendor"]),
+//   validateRequest,
+//   async (req, res, next) => {
 //     try {
-//       const ticket = await Ticket.findByIdAndUpdate(
-//         id,
-//         { verified: "rejected", advertised: false },
-//         { new: true }
-//       );
+//       const { title, from, to, transportType, price, quantity, departureAt } =
+//         req.body;
 
-//       if (!ticket) {
-//         return res.status(404).json({ message: "Ticket not found" });
-//       }
+//       const requiredFields = [
+//         "title",
+//         "from",
+//         "to",
+//         "transportType",
+//         "price",
+//         "quantity",
+//         "departureAt",
+//       ];
+//       const missingFields = requiredFields.filter((field) => !req.body[field]);
 
-//       res.json({
-//         message: "Ticket rejected",
-//         ticket,
-//       });
-//     } catch (error) {
-//       console.error("Error rejecting ticket:", error);
-//       res.status(500).json({ message: "Failed to reject ticket" });
-//     }
-//   }
-// );
-
-// // Toggle advertisement
-// app.patch(
-//   "/api/admin/tickets/:id/advertise",
-//   verifyFirebaseToken,
-//   requireRole("admin"),
-//   async (req, res) => {
-//     const { id } = req.params;
-
-//     if (mongoose.connection.readyState !== 1) {
-//       return res.status(503).json({ message: "Database not available" });
-//     }
-
-//     try {
-//       const ticket = await Ticket.findById(id);
-//       if (!ticket) {
-//         return res.status(404).json({ message: "Ticket not found" });
-//       }
-
-//       if (ticket.verified !== "approved") {
-//         return res
-//           .status(400)
-//           .json({ message: "Only approved tickets can be advertised" });
-//       }
-
-//       // Check max advertised tickets
-//       if (!ticket.advertised) {
-//         const advertisedCount = await Ticket.countDocuments({
-//           advertised: true,
+//       if (missingFields.length > 0) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `Missing required fields: ${missingFields.join(", ")}`,
 //         });
-//         if (advertisedCount >= 6) {
-//           return res
-//             .status(400)
-//             .json({ message: "Maximum 6 tickets can be advertised" });
-//         }
 //       }
 
-//       ticket.advertised = !ticket.advertised;
+//       if (price < 0) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Price cannot be negative",
+//         });
+//       }
+
+//       if (quantity < 1) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Quantity must be at least 1",
+//         });
+//       }
+
+//       const newTicket = await Ticket.create({
+//         ...req.body,
+//         vendorId: req.mongoUser.uid || req.mongoUser._id,
+//         vendorName: req.mongoUser.name || req.mongoUser.email,
+//         availableQuantity: req.body.quantity,
+//         verified: "pending",
+//         isActive: true, // FIXED: Tickets should be active by default
+//       });
+
+//       res.status(201).json({
+//         success: true,
+//         message: "Ticket submitted for admin approval",
+//         data: {
+//           ticket: newTicket,
+//         },
+//       });
+//     } catch (error) {
+//       next(error);
+//     }
+//   }
+// );
+
+// // ---------- ADMIN ROUTES ----------
+// app.get(
+//   "/api/admin/dashboard",
+//   universalAuthMiddleware,
+//   requireRole(["admin"]),
+//   async (req, res, next) => {
+//     try {
+//       const [totalUsers, totalTickets, totalBookings, pendingTickets] =
+//         await Promise.all([
+//           User.countDocuments(),
+//           Ticket.countDocuments(),
+//           Booking.countDocuments(),
+//           Ticket.countDocuments({ verified: "pending" }),
+//         ]);
+
+//       res.json({
+//         success: true,
+//         data: {
+//           users: totalUsers,
+//           tickets: totalTickets,
+//           bookings: totalBookings,
+//           pendingApprovals: pendingTickets,
+//         },
+//       });
+//     } catch (error) {
+//       next(error);
+//     }
+//   }
+// );
+
+// // FIXED: Admin approval - activate tickets when approved
+// app.put(
+//   "/api/admin/tickets/:id/verify",
+//   universalAuthMiddleware,
+//   requireRole(["admin"]),
+//   async (req, res, next) => {
+//     try {
+//       const { status } = req.body;
+
+//       if (!["approved", "rejected"].includes(status)) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Invalid status. Must be 'approved' or 'rejected'",
+//         });
+//       }
+
+//       const ticket = await Ticket.findById(req.params.id);
+//       if (!ticket) {
+//         return res.status(404).json({
+//           success: false,
+//           message: "Ticket not found",
+//         });
+//       }
+
+//       ticket.verified = status;
+//       ticket.isActive = status === "approved"; // FIXED: Activate when approved
 //       await ticket.save();
 
 //       res.json({
-//         message: ticket.advertised
-//           ? "Ticket advertised"
-//           : "Ticket removed from advertisement",
-//         ticket,
+//         success: true,
+//         message: `Ticket ${status} successfully`,
+//         data: {
+//           ticket,
+//         },
 //       });
 //     } catch (error) {
-//       console.error("Error toggling advertisement:", error);
-//       res
-//         .status(500)
-//         .json({ message: "Failed to update advertisement status" });
+//       next(error);
 //     }
 //   }
 // );
 
-// // ---------- Error Handling Middleware ----------
-// app.use((err, req, res, next) => {
-//   console.error("Unhandled error:", err);
-//   res.status(500).json({
-//     message: "Internal server error",
-//     error: process.env.NODE_ENV === "development" ? err.message : undefined,
+// // ---------- Apply Error Handler ----------
+// app.use(errorHandler);
+
+// // 404 handler
+// app.use((req, res) => {
+//   res.status(404).json({
+//     success: false,
+//     message: `Route not found: ${req.method} ${req.url}`,
 //   });
 // });
 
 // // ---------- Start Server ----------
 // const PORT = process.env.PORT || 5000;
-// app.listen(PORT, () => {
-//   console.log(`🚀 Server running on port ${PORT}`);
-//   console.log(`🌐 Access: http://localhost:${PORT}`);
-//   console.log(`📡 API Status: http://localhost:${PORT}/`);
-//   console.log(`🎫 Advertised Tickets: http://localhost:${PORT}/api/advertised`);
+// const server = app.listen(PORT, () => {
+//   console.log(`🚀 Server running on http://localhost:${PORT}`);
+//   console.log("==========================================");
+//   console.log("🔧 TICKET DISPLAY FIX APPLIED:");
+//   console.log(
+//     "1. Added /api/debug/approve-all to approve AND activate tickets"
+//   );
+//   console.log(
+//     "2. Added /api/debug/activate-approved to only activate approved tickets"
+//   );
+//   console.log(
+//     "3. Fixed vendor ticket creation - tickets are now active by default"
+//   );
+//   console.log("4. Fixed admin approval - tickets are activated when approved");
+//   console.log("5. To fix existing tickets, visit: POST /api/debug/approve-all");
+//   console.log("==========================================");
+// });
+
+// // Graceful shutdown
+// process.on("SIGTERM", () => {
+//   console.log("SIGTERM received. Shutting down gracefully...");
+//   server.close(() => {
+//     mongoose.connection.close(false, () => {
+//       process.exit(0);
+//     });
+//   });
+// });
+
+// process.on("uncaughtException", (error) => {
+//   console.error("💥 Uncaught Exception:", error);
+//   process.exit(1);
 // });
 require("dotenv").config();
 const express = require("express");
@@ -698,600 +922,1007 @@ const admin = require("firebase-admin");
 const bodyParser = require("body-parser");
 const fs = require("fs");
 const path = require("path");
+const jwt = require("jsonwebtoken");
 
 const app = express();
-app.use(cors());
-app.use(bodyParser.json());
 
-// Fix Mongoose deprecation warning
-mongoose.set('strictQuery', false);
-
-// ---------- Firebase Admin ----------
-const serviceAccountPath = path.join(
-  __dirname,
-  "ticketbari-projects-firebase-adminsdk-fbsvc-1d8b29239b.json"
+// Better CORS setup
+app.use(
+  cors({
+    origin: ["http://localhost:3000", "http://localhost:5173"],
+    credentials: true,
+  })
 );
 
-if (!fs.existsSync(serviceAccountPath)) {
-  console.error("❌ Firebase JSON file not found at:", serviceAccountPath);
-  process.exit(1);
-}
+// Body parser
+app.use(bodyParser.json());
 
+// Add request logging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url} - ${new Date().toISOString()}`);
+  next();
+});
+
+// ---------- MongoDB Connection ----------
+mongoose.set("strictQuery", false);
+const MONGO_URI = process.env.MONGO_URI;
+
+mongoose
+  .connect(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log("✅ MongoDB Connected Successfully");
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB connection failed:", err.message);
+  });
+
+// ---------- Firebase Admin ----------
+let firebaseApp;
 try {
+  const serviceAccountPath = path.join(
+    __dirname,
+    "ticketbari-projects-firebase-adminsdk-fbsvc-1d8b29239b.json"
+  );
+
+  if (!fs.existsSync(serviceAccountPath)) {
+    throw new Error("Firebase service account file not found!");
+  }
+
   const serviceAccount = require(serviceAccountPath);
-  admin.initializeApp({
+  firebaseApp = admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
   console.log("✅ Firebase Admin initialized");
 } catch (error) {
-  console.error("❌ Firebase Admin error:", error.message);
-  process.exit(1);
+  console.error("❌ Firebase Admin Error:", error.message);
+  console.log("Running without Firebase (JWT only mode)");
+  firebaseApp = null;
 }
-
-// ---------- MongoDB Atlas Connection ----------
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://TICKETBARI-PROJECTS:MwcRwXSla0ahEjKj@cluster0.qj2eop5.mongodb.net/ticketbari?retryWrites=true&w=majority";
-
-console.log("🔗 Connecting to MongoDB Atlas...");
-
-mongoose.connect(MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 10000,
-})
-.then(() => {
-  console.log("✅ MongoDB Atlas connected!");
-  console.log(`📊 Database: ${mongoose.connection.name}`);
-})
-.catch((err) => {
-  console.error("❌ MongoDB connection failed:", err.message);
-  console.log("⚠️ Some features may not work");
-});
 
 // ---------- Mongoose Schemas ----------
 const { Schema } = mongoose;
 
-// User Schema
-const userSchema = new Schema({
-  uid: { type: String, required: true, unique: true },
-  name: String,
-  email: { type: String, required: true },
-  photoURL: String,
-  role: { 
-    type: String, 
-    enum: ["user", "vendor", "admin"], 
-    default: "user" 
+const userSchema = new Schema(
+  {
+    uid: { type: String, required: true, unique: true, index: true },
+    name: String,
+    email: { type: String, required: true, lowercase: true, trim: true },
+    photoURL: String,
+    role: {
+      type: String,
+      enum: ["user", "vendor", "admin"],
+      default: "user",
+      index: true,
+    },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
   },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
+  {
+    timestamps: true,
+  }
+);
+
+const ticketSchema = new Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    from: { type: String, required: true, trim: true },
+    to: { type: String, required: true, trim: true },
+    transportType: {
+      type: String,
+      enum: ["bus", "train", "launch", "plane"],
+      required: true,
+      index: true,
+    },
+    price: { type: Number, required: true, min: 0 },
+    quantity: { type: Number, required: true, min: 0 },
+    availableQuantity: {
+      type: Number,
+      default: function () {
+        return this.quantity;
+      },
+    },
+    perks: [String],
+    image: {
+      type: String,
+      default:
+        "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=500&auto=format&fit=crop",
+    },
+    departureAt: { type: Date, required: true, index: true },
+    arrivalAt: Date,
+    vendorId: { type: String, required: true, index: true },
+    vendorName: String,
+    verified: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+      index: true,
+    },
+    advertised: { type: Boolean, default: false, index: true },
+    description: String,
+    isActive: { type: Boolean, default: true },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+const bookingSchema = new Schema(
+  {
+    userId: { type: String, required: true, index: true },
+    userName: String,
+    userEmail: String,
+    ticketId: {
+      type: Schema.Types.ObjectId,
+      ref: "Ticket",
+      required: true,
+      index: true,
+    },
+    ticketTitle: String,
+    quantity: { type: Number, required: true, min: 1 },
+    totalPrice: { type: Number, required: true, min: 0 },
+    status: {
+      type: String,
+      enum: ["pending", "confirmed", "cancelled", "completed"],
+      default: "pending",
+      index: true,
+    },
+    bookingDate: { type: Date, default: Date.now },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "paid", "refunded"],
+      default: "pending",
+      index: true,
+    },
+    bookingReference: { type: String, unique: true },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+bookingSchema.pre("save", function (next) {
+  if (!this.bookingReference) {
+    this.bookingReference =
+      "TB-" +
+      Date.now() +
+      "-" +
+      Math.random().toString(36).substr(2, 9).toUpperCase();
+  }
+  next();
 });
 
-// Ticket Schema
-const ticketSchema = new Schema({
-  title: { type: String, required: true },
-  from: { type: String, required: true },
-  to: { type: String, required: true },
-  transportType: { 
-    type: String, 
-    enum: ["bus", "train", "launch", "plane"],
-    required: true 
-  },
-  price: { type: Number, required: true, min: 0 },
-  quantity: { type: Number, required: true, min: 0 },
-  perks: [String],
-  image: { 
-    type: String, 
-    default: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=500"
-  },
-  departureAt: { type: Date, required: true },
-  arrivalAt: Date,
-  vendorId: { type: String, required: true },
-  vendorName: String,
-  verified: {
-    type: String,
-    enum: ["pending", "approved", "rejected"],
-    default: "pending"
-  },
-  advertised: { type: Boolean, default: false },
-  description: String,
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-// Booking Schema
-const bookingSchema = new Schema({
-  userId: { type: String, required: true },
-  userName: String,
-  userEmail: String,
-  ticketId: { type: String, required: true },
-  ticketTitle: String,
-  quantity: { type: Number, required: true, min: 1 },
-  totalPrice: { type: Number, required: true, min: 0 },
-  status: {
-    type: String,
-    enum: ["pending", "confirmed", "cancelled", "completed"],
-    default: "pending"
-  },
-  bookingDate: { type: Date, default: Date.now },
-  paymentStatus: {
-    type: String,
-    enum: ["pending", "paid", "refunded"],
-    default: "pending"
-  },
-  paymentMethod: String,
-  transactionId: String,
-  notes: String,
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-// Create models
 const User = mongoose.model("User", userSchema);
 const Ticket = mongoose.model("Ticket", ticketSchema);
 const Booking = mongoose.model("Booking", bookingSchema);
 
-// Create indexes (optional but recommended)
-async function createIndexes() {
-  try {
-    await Ticket.createIndexes([
-      { key: { verified: 1, advertised: 1 } },
-      { key: { transportType: 1 } },
-      { key: { from: 1, to: 1 } },
-      { key: { price: 1 } },
-      { key: { departureAt: 1 } }
-    ]);
-    await User.createIndex({ uid: 1 }, { unique: true });
-    await Booking.createIndex({ userId: 1 });
-    console.log("✅ Database indexes created");
-  } catch (error) {
-    console.log("⚠️ Could not create indexes:", error.message);
+// ---------- Validation Helper ----------
+const validateRequest = (req, res, next) => {
+  const errors = [];
+
+  if (req.body.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.email)) {
+    errors.push("Invalid email format");
   }
-}
 
-// Run after connection
-mongoose.connection.once('open', () => {
-  createIndexes();
-  
-  // Insert sample data if database is empty
-  insertSampleData();
-});
-
-async function insertSampleData() {
-  try {
-    const count = await Ticket.countDocuments();
-    if (count === 0) {
-      console.log("📝 Inserting sample tickets...");
-      
-      const sampleTickets = [
-        {
-          title: "Express Bus to Cox's Bazar",
-          from: "Dhaka",
-          to: "Cox's Bazar",
-          transportType: "bus",
-          price: 1200,
-          quantity: 25,
-          image: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=500",
-          departureAt: new Date(Date.now() + 86400000 * 2), // 2 days from now
-          vendorId: "vendor_001",
-          vendorName: "Green Line Paribahan",
-          verified: "approved",
-          advertised: true,
-          description: "AC Bus with comfortable seats, WiFi, and meal service"
-        },
-        {
-          title: "Sundarban Tour Launch",
-          from: "Khulna",
-          to: "Sundarban",
-          transportType: "launch",
-          price: 2500,
-          quantity: 15,
-          image: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=500",
-          departureAt: new Date(Date.now() + 86400000 * 3), // 3 days from now
-          vendorId: "vendor_002",
-          vendorName: "Sundarban Travels",
-          verified: "approved",
-          advertised: true,
-          description: "Guided tour to Sundarban with lunch included"
-        },
-        {
-          title: "Intercity Train to Sylhet",
-          from: "Dhaka",
-          to: "Sylhet",
-          transportType: "train",
-          price: 800,
-          quantity: 50,
-          image: "https://images.unsplash.com/photo-1516053256215-940222132676?w=500",
-          departureAt: new Date(Date.now() + 86400000), // 1 day from now
-          vendorId: "vendor_003",
-          vendorName: "Bangladesh Railway",
-          verified: "approved",
-          advertised: true,
-          description: "AC Chair Coach with punctual service"
-        },
-        {
-          title: "Flight to Chittagong",
-          from: "Dhaka",
-          to: "Chittagong",
-          transportType: "plane",
-          price: 4500,
-          quantity: 10,
-          image: "https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=500",
-          departureAt: new Date(Date.now() + 86400000 * 4), // 4 days from now
-          vendorId: "vendor_004",
-          vendorName: "Biman Bangladesh",
-          verified: "approved",
-          advertised: false,
-          description: "Direct flight with in-flight meal"
-        }
-      ];
-      
-      await Ticket.insertMany(sampleTickets);
-      console.log(`✅ Inserted ${sampleTickets.length} sample tickets`);
-    }
-  } catch (error) {
-    console.log("⚠️ Could not insert sample data:", error.message);
+  if (req.body.price && req.body.price < 0) {
+    errors.push("Price cannot be negative");
   }
-}
 
-// ---------- Middleware ----------
-async function verifyFirebaseToken(req, res, next) {
+  if (errors.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors,
+    });
+  }
+
+  next();
+};
+
+// ---------- Auth Middleware ----------
+async function universalAuthMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ 
+    return res.status(401).json({
       success: false,
-      message: "Access denied. No token provided." 
+      message: "No token provided. Please login first.",
     });
   }
-  
-  const idToken = authHeader.split("Bearer ")[1];
-  
+
+  const token = authHeader.split(" ")[1];
+
   try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    req.user = decodedToken;
-    
-    // Create or update user in database
-    try {
-      await User.findOneAndUpdate(
-        { uid: decodedToken.uid },
+    if (firebaseApp) {
+      const decoded = await admin.auth().verifyIdToken(token);
+      req.user = decoded;
+      req.authType = "firebase";
+
+      const mongoUser = await User.findOneAndUpdate(
+        { uid: decoded.uid },
         {
-          uid: decodedToken.uid,
-          name: decodedToken.name || "",
-          email: decodedToken.email,
-          photoURL: decodedToken.picture || "",
-          updatedAt: new Date()
+          uid: decoded.uid,
+          name: decoded.name || decoded.email?.split("@")[0] || "User",
+          email: decoded.email,
+          photoURL: decoded.picture || "",
+          updatedAt: new Date(),
         },
-        { upsert: true, new: true }
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        }
       );
-    } catch (dbError) {
-      console.log("User sync error:", dbError.message);
+
+      req.mongoUser = mongoUser;
+    } else {
+      const decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET || "your-secret-key-change-in-production"
+      );
+      const user = await User.findById(decoded.id);
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: "User not found. Please login again.",
+        });
+      }
+      req.mongoUser = user;
+      req.user = user;
+      req.authType = "jwt";
     }
-    
+
     next();
-  } catch (error) {
-    console.error("Token verification error:", error.message);
-    res.status(401).json({ 
+  } catch (err) {
+    console.error("🔴 Auth Error:", err.message);
+
+    if (err.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        message: "Token expired. Please login again.",
+      });
+    }
+
+    res.status(401).json({
       success: false,
-      message: "Invalid or expired token" 
+      message: "Authentication failed. Please login again.",
     });
   }
 }
 
-// ---------- Routes ----------
+// ---------- Role Middleware ----------
+const requireRole = (roles) => {
+  return (req, res, next) => {
+    if (!req.mongoUser) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
 
-// Health check
+    if (!roles.includes(req.mongoUser.role)) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Required roles: ${roles.join(", ")}`,
+      });
+    }
+
+    next();
+  };
+};
+
+// ---------- Error Handler ----------
+const errorHandler = (err, req, res, next) => {
+  console.error("🔥 Server Error:", err.message);
+
+  if (err.code === 11000) {
+    return res.status(409).json({
+      success: false,
+      message: "Duplicate entry found",
+      field: Object.keys(err.keyPattern)[0],
+    });
+  }
+
+  if (err.name === "ValidationError") {
+    const errors = Object.values(err.errors).map((e) => e.message);
+    return res.status(400).json({
+      success: false,
+      message: "Validation Error",
+      errors,
+    });
+  }
+
+  if (err.name === "JsonWebTokenError") {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid token",
+    });
+  }
+
+  res.status(500).json({
+    success: false,
+    message: "Internal server error",
+  });
+};
+
+// ---------- Public Routes ----------
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    service: "TicketBari Backend API",
+    message: "🎫 TicketBari API is running smoothly!",
     version: "1.0.0",
-    status: "operational",
-    mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      health: "/health",
-      advertised: "/api/advertised",
-      tickets: "/api/tickets",
-      ticketDetails: "/api/tickets/:id",
-      myBookings: "/api/my-bookings (protected)",
-      createBooking: "/api/bookings (protected)"
-    }
+    note: "If tickets are not showing, check /api/debug/tickets to see database contents",
   });
 });
 
-app.get("/health", (req, res) => {
-  res.json({
-    success: true,
+app.get("/api/health", async (req, res) => {
+  const health = {
     status: "healthy",
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected"
-  });
+    database:
+      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    firebase: firebaseApp ? "connected" : "not configured",
+  };
+
+  res.json({ success: true, data: health });
 });
 
-// Public: Get advertised tickets
-app.get("/api/advertised", async (req, res) => {
+// ---------- DEBUG ENDPOINTS ----------
+app.get("/api/debug/tickets", async (req, res) => {
   try {
-    const tickets = await Ticket.find({ 
-      verified: "approved", 
-      advertised: true,
-      departureAt: { $gt: new Date() },
-      quantity: { $gt: 0 }
-    })
-    .sort({ createdAt: -1 })
-    .limit(6);
-    
+    const allTickets = await Ticket.find({});
+    const approvedTickets = await Ticket.find({ verified: "approved" });
+    const pendingTickets = await Ticket.find({ verified: "pending" });
+    const activeTickets = await Ticket.find({ isActive: true });
+    const approvedActive = await Ticket.find({
+      verified: "approved",
+      isActive: true,
+    });
+    const futureTickets = await Ticket.find({
+      departureAt: { $gte: new Date() },
+    });
+    const approvedActiveFuture = await Ticket.find({
+      verified: "approved",
+      isActive: true,
+      departureAt: { $gte: new Date() },
+    });
+
     res.json({
       success: true,
-      count: tickets.length,
-      data: tickets
+      data: {
+        totalTickets: allTickets.length,
+        approvedTickets: approvedTickets.length,
+        pendingTickets: pendingTickets.length,
+        activeTickets: activeTickets.length,
+        approvedActive: approvedActive.length,
+        futureTickets: futureTickets.length,
+        approvedActiveFuture: approvedActiveFuture.length,
+        sampleTicket: allTickets[0] || null,
+        allTickets: allTickets.map((t) => ({
+          _id: t._id,
+          title: t.title,
+          from: t.from,
+          to: t.to,
+          verified: t.verified,
+          isActive: t.isActive,
+          departureAt: t.departureAt,
+          daysUntil: t.departureAt
+            ? Math.floor(
+                (new Date(t.departureAt) - new Date()) / (1000 * 60 * 60 * 24)
+              )
+            : "N/A",
+          price: t.price,
+          transportType: t.transportType,
+        })),
+      },
     });
   } catch (error) {
-    console.error("Error fetching advertised tickets:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Failed to fetch advertised tickets" 
-    });
+    console.error("Debug error:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Public: Get all tickets with filters
-app.get("/api/tickets", async (req, res) => {
+// DEBUG: Test filter logic endpoint
+app.get("/api/debug/test-filter", async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 8, 
-      transport, 
-      from, 
-      to, 
-      sort = "departure_asc",
+    console.log("🔍 DEBUG: Testing filter logic...");
+
+    // Test 1: Show ALL tickets
+    const allTickets = await Ticket.find({});
+    console.log(`1. Total tickets in DB: ${allTickets.length}`);
+
+    // Test 2: Show approved tickets
+    const approvedTickets = await Ticket.find({ verified: "approved" });
+    console.log(`2. Approved tickets: ${approvedTickets.length}`);
+
+    // Test 3: Show active tickets
+    const activeTickets = await Ticket.find({ isActive: true });
+    console.log(`3. Active tickets: ${activeTickets.length}`);
+
+    // Test 4: Show approved AND active (current filter)
+    const approvedActive = await Ticket.find({
+      verified: "approved",
+      isActive: true,
+    });
+    console.log(
+      `4. Approved & Active (current filter): ${approvedActive.length}`
+    );
+
+    // Test 5: Show ANY ticket regardless of status
+    const anyTickets = await Ticket.find({}).limit(5);
+
+    res.json({
+      success: true,
+      debug: {
+        totalInDB: allTickets.length,
+        approved: approvedTickets.length,
+        active: activeTickets.length,
+        approvedActive: approvedActive.length,
+        sampleTickets: anyTickets.map((t) => ({
+          _id: t._id,
+          title: t.title,
+          verified: t.verified,
+          isActive: t.isActive,
+          departureAt: t.departureAt,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Debug test error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// FIXED: This endpoint now approves AND activates tickets
+app.post("/api/debug/approve-all", async (req, res) => {
+  try {
+    const result = await Ticket.updateMany(
+      {},
+      {
+        $set: {
+          verified: "approved",
+          isActive: true,
+          advertised: true,
+        },
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `✅ Approved and activated ${result.modifiedCount} tickets`,
+      details: {
+        modifiedCount: result.modifiedCount,
+        matchedCount: result.matchedCount,
+      },
+    });
+  } catch (error) {
+    console.error("Approve error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// NEW: Add an endpoint to only activate approved tickets
+app.post("/api/debug/activate-approved", async (req, res) => {
+  try {
+    const result = await Ticket.updateMany(
+      { verified: "approved" },
+      { $set: { isActive: true } }
+    );
+
+    res.json({
+      success: true,
+      message: `✅ Activated ${result.modifiedCount} approved tickets`,
+      details: {
+        modifiedCount: result.modifiedCount,
+        matchedCount: result.matchedCount,
+      },
+    });
+  } catch (error) {
+    console.error("Activate error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DEBUG: Temporary endpoint to show ALL tickets
+app.get("/api/tickets-debug", async (req, res, next) => {
+  try {
+    console.log("🔍 DEBUG: /api/tickets-debug - Showing ALL tickets");
+
+    const tickets = await Ticket.find({}).limit(20);
+
+    console.log(`✅ Found ${tickets.length} tickets total`);
+
+    res.json({
+      success: true,
+      message: "DEBUG MODE: Showing all tickets",
+      debug: {
+        total: tickets.length,
+        filterApplied: "NONE - showing all tickets",
+      },
+      data: {
+        tickets,
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: tickets.length,
+          pages: 1,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error in /api/tickets-debug:", error);
+    next(error);
+  }
+});
+
+// ---------- ADVERTISED TICKETS ----------
+app.get("/api/advertised", async (req, res, next) => {
+  try {
+    const tickets = await Ticket.find({
+      advertised: true,
+      verified: "approved",
+      isActive: true,
+    })
+      .sort({ departureAt: 1 })
+      .limit(6);
+
+    res.json({
+      success: true,
+      data: {
+        tickets,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------- FIXED: ALL TICKETS ENDPOINT (MAIN FIX) ----------
+app.get("/api/tickets", async (req, res, next) => {
+  try {
+    const {
+      page = 1,
+      limit = 8,
+      transport = "",
+      sort = "",
+      from,
+      to,
       minPrice,
-      maxPrice
+      maxPrice,
+      date,
+      debug = false, // Add debug parameter
     } = req.query;
-    
+
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
-    
-    // Build filter
-    const filter = { 
-      verified: "approved",
-      departureAt: { $gt: new Date() },
-      quantity: { $gt: 0 }
-    };
-    
-    if (transport && ["bus", "train", "launch", "plane"].includes(transport)) {
+
+    console.log("📥 Tickets API Request:", req.query);
+
+    // Build filter object - TEMPORARY FIX: Show approved tickets regardless of isActive
+    let filter = {};
+
+    if (debug === "true") {
+      console.log("🔍 DEBUG MODE: Showing ALL tickets");
+      filter = {}; // Show everything
+    } else {
+      // TEMPORARY: Show approved tickets, ignore isActive for now
+      filter = {
+        verified: "approved",
+        // isActive: true, // Commented out temporarily
+      };
+      console.log(
+        "⚠️ TEMPORARY: Showing approved tickets (isActive check disabled)"
+      );
+    }
+
+    // DEBUG: Check what we have in DB
+    console.log(
+      "🔍 Getting tickets with filter:",
+      JSON.stringify(filter, null, 2)
+    );
+    const filteredTickets = await Ticket.find(filter);
+    console.log(
+      `🔍 Found ${filteredTickets.length} tickets with current filter`
+    );
+
+    // Add transport filter if specified
+    if (transport && transport !== "") {
       filter.transportType = transport;
+      console.log(`🔍 Filtering by transport: ${transport}`);
     }
-    
-    if (from) filter.from = { $regex: from, $options: "i" };
-    if (to) filter.to = { $regex: to, $options: "i" };
-    if (minPrice) filter.price = { $gte: parseFloat(minPrice) };
-    if (maxPrice) {
-      filter.price = filter.price || {};
-      filter.price.$lte = parseFloat(maxPrice);
+
+    // Add from/to filters if specified
+    if (from && from !== "") {
+      filter.from = new RegExp(from, "i");
     }
-    
-    // Build sort
-    let sortOption = {};
-    switch(sort) {
-      case "price_asc": sortOption = { price: 1 }; break;
-      case "price_desc": sortOption = { price: -1 }; break;
-      case "departure_asc": sortOption = { departureAt: 1 }; break;
-      case "departure_desc": sortOption = { departureAt: -1 }; break;
-      default: sortOption = { createdAt: -1 };
+
+    if (to && to !== "") {
+      filter.to = new RegExp(to, "i");
     }
-    
-    // Execute query
+
+    // Price range filters
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
+
+    // Only add departure filter if date is provided
+    if (date && date !== "") {
+      const startDate = new Date(date);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(date);
+      endDate.setHours(23, 59, 59, 999);
+      filter.departureAt = { $gte: startDate, $lte: endDate };
+    }
+
+    console.log("🔍 Final MongoDB Filter:", JSON.stringify(filter, null, 2));
+
+    // Build sort object
+    let sortOption = { createdAt: -1 }; // Default: newest first
+
+    if (sort === "price_asc") {
+      sortOption = { price: 1 };
+    } else if (sort === "price_desc") {
+      sortOption = { price: -1 };
+    }
+
+    // Execute queries
     const [tickets, total] = await Promise.all([
-      Ticket.find(filter)
-        .sort(sortOption)
-        .skip(skip)
-        .limit(limitNum),
-      Ticket.countDocuments(filter)
+      Ticket.find(filter).sort(sortOption).skip(skip).limit(limitNum),
+      Ticket.countDocuments(filter),
     ]);
-    
+
+    console.log(
+      `✅ FINAL: Found ${tickets.length} tickets out of ${total} total`
+    );
+
+    if (tickets.length > 0) {
+      console.log(
+        "✅ Sample tickets:",
+        tickets.slice(0, 2).map((t) => ({
+          id: t._id,
+          title: t.title,
+          verified: t.verified,
+          isActive: t.isActive,
+          departureAt: t.departureAt,
+          price: t.price,
+          transportType: t.transportType,
+        }))
+      );
+    } else {
+      console.log("⚠️ No tickets found with filter:", filter);
+      console.log(
+        "💡 Try: POST /api/debug/approve-all to approve and activate tickets"
+      );
+    }
+
     res.json({
       success: true,
       data: {
         tickets,
         pagination: {
-          total,
           page: pageNum,
           limit: limitNum,
-          pages: Math.ceil(total / limitNum),
-          hasNext: pageNum < Math.ceil(total / limitNum),
-          hasPrev: pageNum > 1
-        }
-      }
+          total,
+          pages: Math.ceil(total / limitNum) || 0,
+          hasNext: pageNum * limitNum < total,
+          hasPrev: pageNum > 1,
+        },
+      },
     });
   } catch (error) {
-    console.error("Error fetching tickets:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Failed to fetch tickets" 
-    });
+    console.error("❌ Error in /api/tickets:", error);
+    next(error);
   }
 });
 
-// Public: Get single ticket
-app.get("/api/tickets/:id", async (req, res) => {
+// ---------- SINGLE TICKET ----------
+app.get("/api/tickets/:id", async (req, res, next) => {
   try {
     const ticket = await Ticket.findById(req.params.id);
-    
+
     if (!ticket) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Ticket not found" 
+        message: "Ticket not found",
       });
     }
-    
+
     res.json({
       success: true,
-      data: ticket
+      data: {
+        ticket,
+      },
     });
   } catch (error) {
-    console.error("Error fetching ticket:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Failed to fetch ticket" 
-    });
+    next(error);
   }
 });
 
-// Protected: Get user's bookings
-app.get("/api/my-bookings", verifyFirebaseToken, async (req, res) => {
-  try {
-    const bookings = await Booking.find({ userId: req.user.uid })
-      .sort({ bookingDate: -1 });
-    
-    res.json({
-      success: true,
-      data: bookings
-    });
-  } catch (error) {
-    console.error("Error fetching bookings:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Failed to fetch bookings" 
-    });
-  }
-});
+// ---------- USER ROUTES ----------
+app.get(
+  "/api/my-bookings",
+  universalAuthMiddleware,
+  requireRole(["user"]),
+  async (req, res, next) => {
+    try {
+      const userId = req.mongoUser.uid || req.mongoUser._id;
+      const bookings = await Booking.find({ userId })
+        .populate("ticketId", "title from to departureAt transportType image")
+        .sort({ createdAt: -1 });
 
-// Protected: Create booking
-app.post("/api/bookings", verifyFirebaseToken, async (req, res) => {
-  try {
-    const { ticketId, quantity } = req.body;
-    
-    if (!ticketId || !quantity || quantity < 1) {
-      return res.status(400).json({ 
-        success: false,
-        message: "Ticket ID and quantity (min 1) are required" 
+      res.json({
+        success: true,
+        data: {
+          bookings,
+        },
       });
+    } catch (error) {
+      next(error);
     }
-    
-    // Get ticket
-    const ticket = await Ticket.findById(ticketId);
-    
-    if (!ticket) {
-      return res.status(404).json({ 
-        success: false,
-        message: "Ticket not found" 
-      });
-    }
-    
-    if (ticket.quantity < quantity) {
-      return res.status(400).json({ 
-        success: false,
-        message: `Only ${ticket.quantity} tickets available`
-      });
-    }
-    
-    if (new Date(ticket.departureAt) <= new Date()) {
-      return res.status(400).json({ 
-        success: false,
-        message: "This ticket has already departed" 
-      });
-    }
-    
-    // Calculate total price
-    const totalPrice = ticket.price * quantity;
-    
-    // Create booking
-    const booking = new Booking({
-      userId: req.user.uid,
-      userName: req.user.name || req.user.email.split('@')[0],
-      userEmail: req.user.email,
-      ticketId,
-      ticketTitle: ticket.title,
-      quantity,
-      totalPrice,
-      status: "pending",
-      paymentStatus: "pending"
-    });
-    
-    await booking.save();
-    
-    res.status(201).json({
-      success: true,
-      message: "Booking created successfully",
-      data: booking
-    });
-  } catch (error) {
-    console.error("Error creating booking:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Failed to create booking" 
-    });
   }
-});
+);
 
-// Protected: Cancel booking
-app.post("/api/bookings/:id/cancel", verifyFirebaseToken, async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.id);
-    
-    if (!booking) {
-      return res.status(404).json({ 
-        success: false,
-        message: "Booking not found" 
+app.post(
+  "/api/bookings",
+  universalAuthMiddleware,
+  requireRole(["user"]),
+  validateRequest,
+  async (req, res, next) => {
+    try {
+      const { ticketId, quantity } = req.body;
+
+      if (!ticketId || !quantity || quantity < 1) {
+        return res.status(400).json({
+          success: false,
+          message: "Ticket ID and quantity (minimum 1) are required",
+        });
+      }
+
+      const ticket = await Ticket.findById(ticketId);
+      if (!ticket) {
+        return res.status(404).json({
+          success: false,
+          message: "Ticket not found",
+        });
+      }
+
+      if (ticket.availableQuantity < quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Only ${ticket.availableQuantity} tickets available`,
+        });
+      }
+
+      const booking = await Booking.create({
+        userId: req.mongoUser.uid || req.mongoUser._id,
+        userName: req.mongoUser.name || req.mongoUser.email.split("@")[0],
+        userEmail: req.mongoUser.email,
+        ticketId,
+        ticketTitle: ticket.title,
+        quantity,
+        totalPrice: ticket.price * quantity,
+        status: "pending",
       });
-    }
-    
-    if (booking.userId !== req.user.uid) {
-      return res.status(403).json({ 
-        success: false,
-        message: "Not authorized to cancel this booking" 
+
+      // Update ticket availability
+      ticket.availableQuantity -= quantity;
+      await ticket.save();
+
+      res.status(201).json({
+        success: true,
+        message: "Booking created successfully",
+        data: {
+          booking,
+        },
       });
+    } catch (error) {
+      next(error);
     }
-    
-    if (booking.status === "cancelled") {
-      return res.status(400).json({ 
-        success: false,
-        message: "Booking is already cancelled" 
-      });
-    }
-    
-    booking.status = "cancelled";
-    booking.updatedAt = new Date();
-    await booking.save();
-    
-    res.json({
-      success: true,
-      message: "Booking cancelled successfully",
-      data: booking
-    });
-  } catch (error) {
-    console.error("Error cancelling booking:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Failed to cancel booking" 
-    });
   }
-});
+);
 
-// ---------- Error Handling ----------
+// ---------- VENDOR ROUTES ----------
+app.get(
+  "/api/vendor/tickets",
+  universalAuthMiddleware,
+  requireRole(["vendor"]),
+  async (req, res, next) => {
+    try {
+      const vendorId = req.mongoUser.uid || req.mongoUser._id;
+      const tickets = await Ticket.find({ vendorId }).sort({ createdAt: -1 });
+
+      res.json({
+        success: true,
+        data: {
+          tickets,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// FIXED: Vendor ticket creation - tickets should be active by default
+app.post(
+  "/api/vendor/tickets",
+  universalAuthMiddleware,
+  requireRole(["vendor"]),
+  validateRequest,
+  async (req, res, next) => {
+    try {
+      const { title, from, to, transportType, price, quantity, departureAt } =
+        req.body;
+
+      const requiredFields = [
+        "title",
+        "from",
+        "to",
+        "transportType",
+        "price",
+        "quantity",
+        "departureAt",
+      ];
+      const missingFields = requiredFields.filter((field) => !req.body[field]);
+
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Missing required fields: ${missingFields.join(", ")}`,
+        });
+      }
+
+      if (price < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Price cannot be negative",
+        });
+      }
+
+      if (quantity < 1) {
+        return res.status(400).json({
+          success: false,
+          message: "Quantity must be at least 1",
+        });
+      }
+
+      const newTicket = await Ticket.create({
+        ...req.body,
+        vendorId: req.mongoUser.uid || req.mongoUser._id,
+        vendorName: req.mongoUser.name || req.mongoUser.email,
+        availableQuantity: req.body.quantity,
+        verified: "pending",
+        isActive: true, // FIXED: Tickets should be active by default
+      });
+
+      res.status(201).json({
+        success: true,
+        message: "Ticket submitted for admin approval",
+        data: {
+          ticket: newTicket,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ---------- ADMIN ROUTES ----------
+app.get(
+  "/api/admin/dashboard",
+  universalAuthMiddleware,
+  requireRole(["admin"]),
+  async (req, res, next) => {
+    try {
+      const [totalUsers, totalTickets, totalBookings, pendingTickets] =
+        await Promise.all([
+          User.countDocuments(),
+          Ticket.countDocuments(),
+          Booking.countDocuments(),
+          Ticket.countDocuments({ verified: "pending" }),
+        ]);
+
+      res.json({
+        success: true,
+        data: {
+          users: totalUsers,
+          tickets: totalTickets,
+          bookings: totalBookings,
+          pendingApprovals: pendingTickets,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// FIXED: Admin approval - activate tickets when approved
+app.put(
+  "/api/admin/tickets/:id/verify",
+  universalAuthMiddleware,
+  requireRole(["admin"]),
+  async (req, res, next) => {
+    try {
+      const { status } = req.body;
+
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid status. Must be 'approved' or 'rejected'",
+        });
+      }
+
+      const ticket = await Ticket.findById(req.params.id);
+      if (!ticket) {
+        return res.status(404).json({
+          success: false,
+          message: "Ticket not found",
+        });
+      }
+
+      ticket.verified = status;
+      ticket.isActive = status === "approved"; // FIXED: Activate when approved
+      await ticket.save();
+
+      res.json({
+        success: true,
+        message: `Ticket ${status} successfully`,
+        data: {
+          ticket,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ---------- Apply Error Handler ----------
+app.use(errorHandler);
+
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: "Endpoint not found"
-  });
-});
-
-app.use((err, req, res, next) => {
-  console.error("Server error:", err);
-  res.status(500).json({
-    success: false,
-    message: "Internal server error",
-    error: process.env.NODE_ENV === "development" ? err.message : undefined
+    message: `Route not found: ${req.method} ${req.url}`,
   });
 });
 
 // ---------- Start Server ----------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 API Base: http://localhost:${PORT}`);
-  console.log(`📊 Database: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
-  console.log(`🎫 Advertised Tickets: http://localhost:${PORT}/api/advertised`);
-  console.log(`📋 All Tickets: http://localhost:${PORT}/api/tickets`);
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log("==========================================");
+  console.log("🔧 TICKET DISPLAY FIX APPLIED:");
+  console.log("1. Added /api/debug/test-filter to diagnose filter issues");
+  console.log("2. Added /api/tickets-debug to show ALL tickets");
+  console.log(
+    "3. /api/tickets now shows approved tickets (isActive temporarily disabled)"
+  );
+  console.log("4. To fix tickets: POST /api/debug/approve-all");
+  console.log("5. Test: GET /api/debug/test-filter");
+  console.log("6. Debug: GET /api/tickets-debug");
+  console.log("==========================================");
+});
+
+// Graceful shutdown
+process.on("SIGTERM", () => {
+  console.log("SIGTERM received. Shutting down gracefully...");
+  server.close(() => {
+    mongoose.connection.close(false, () => {
+      process.exit(0);
+    });
+  });
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("💥 Uncaught Exception:", error);
+  process.exit(1);
 });
