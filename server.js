@@ -1124,6 +1124,219 @@ app.get("/api/my-vendor-application", firebaseAuthMiddleware, async (req, res) =
 
 
 
+// Submit vendor application
+app.post("/api/apply-vendor", firebaseAuthMiddleware, async (req, res) => {
+  try {
+    console.log(`📋 Vendor application submitted by: ${req.mongoUser.email}`);
+    
+    const {
+      businessName,
+      contactName,
+      phone,
+      businessType,
+      description,
+      website,
+      address,
+      taxId
+    } = req.body;
+    
+    // Validate required fields
+    if (!businessName || !contactName || !phone || !businessType || !description || !address) {
+      return res.status(400).json({
+        success: false,
+        message: "Please fill all required fields"
+      });
+    }
+    
+    // Check if user is already a vendor
+    if (req.mongoUser.role === "vendor") {
+      return res.status(400).json({
+        success: false,
+        message: "You are already a vendor"
+      });
+    }
+    
+    let application;
+    
+    if (mongoose.connection.readyState === 1) {
+      // Check if user already has a pending application
+      const existingApplication = await VendorApplication.findOne({
+        userId: req.mongoUser.uid,
+        status: "pending"
+      });
+      
+      if (existingApplication) {
+        return res.status(400).json({
+          success: false,
+          message: "You already have a pending vendor application"
+        });
+      }
+      
+      // Create new application
+      application = new VendorApplication({
+        userId: req.mongoUser.uid,
+        userName: req.mongoUser.name,
+        userEmail: req.mongoUser.email,
+        businessName,
+        contactName,
+        phone,
+        businessType,
+        description,
+        website: website || "",
+        address,
+        taxId: taxId || "",
+        status: "pending"
+      });
+      
+      await application.save();
+      console.log(`✅ Vendor application saved for: ${req.mongoUser.email}`);
+      
+    } else {
+      // Mock response when DB is not connected
+      application = {
+        _id: "mock-application-id",
+        businessName,
+        contactName,
+        phone,
+        businessType,
+        description,
+        website,
+        address,
+        taxId,
+        status: "pending",
+        createdAt: new Date()
+      };
+      
+      console.log("⚠️ Mock: Vendor application would be saved if DB connected");
+    }
+    
+    res.json({
+      success: true,
+      message: "Vendor application submitted successfully!",
+      data: { application }
+    });
+    
+  } catch (error) {
+    console.error("Error submitting vendor application:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error submitting application",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+});
+
+// Review vendor application (Admin only) - FIXED VERSION
+app.put("/api/admin/vendor-applications/:id/review", firebaseAuthMiddleware, requireRole(["admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reviewNotes } = req.body;
+    
+    console.log(`📝 Reviewing vendor application ${id} - Status: ${status}`);
+    
+    if (!["approved", "rejected"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status. Must be 'approved' or 'rejected'"
+      });
+    }
+    
+    let updatedApplication = null;
+    
+    if (mongoose.connection.readyState === 1) {
+      // Find the application
+      const application = await VendorApplication.findById(id);
+      
+      if (!application) {
+        return res.status(404).json({
+          success: false,
+          message: "Vendor application not found"
+        });
+      }
+      
+      console.log(`📊 Found application for: ${application.userEmail}`);
+      
+      // Update application status
+      updatedApplication = await VendorApplication.findByIdAndUpdate(
+        id,
+        {
+          status: status,
+          reviewNotes: reviewNotes || "",
+          reviewedBy: req.mongoUser._id,
+          updatedAt: new Date()
+        },
+        { new: true }
+      );
+      
+      // If approved, update user role to vendor
+      if (status === "approved") {
+        console.log(`🔄 Updating user role to vendor for: ${application.userEmail}`);
+        
+        // Find user by email first (more reliable than UID in mock mode)
+        const userToUpdate = await User.findOne({ 
+          $or: [
+            { uid: application.userId },
+            { email: application.userEmail }
+          ]
+        });
+        
+        if (userToUpdate) {
+          userToUpdate.role = "vendor";
+          await userToUpdate.save();
+          console.log(`✅ User ${userToUpdate.email} role updated to vendor`);
+        } else {
+          console.log(`⚠️ User not found for application: ${application.userEmail}`);
+          // Create user if not found (for mock mode)
+          const newUser = new User({
+            uid: application.userId || `vendor-${Date.now()}`,
+            email: application.userEmail,
+            name: application.contactName || application.userName,
+            role: "vendor",
+            emailVerified: true
+          });
+          await newUser.save();
+          console.log(`✅ Created new vendor user: ${application.userEmail}`);
+        }
+      }
+      
+      console.log(`✅ Vendor application ${id} updated to: ${status}`);
+      
+    } else {
+      // Mock response
+      updatedApplication = {
+        _id: id,
+        status: status,
+        reviewNotes: reviewNotes,
+        reviewedBy: req.mongoUser._id,
+        updatedAt: new Date()
+      };
+      
+      console.log("⚠️ Mock: Vendor application would be reviewed if DB connected");
+    }
+    
+    res.json({
+      success: true,
+      message: `Vendor application ${status} successfully`,
+      data: { application: updatedApplication }
+    });
+    
+  } catch (error) {
+    console.error("Error reviewing vendor application:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error reviewing application",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+});
+
+
+
+
+
+
+
+
 
 // ========== DEBUG & UTILITY ROUTES ==========
 // Token debugging endpoint
