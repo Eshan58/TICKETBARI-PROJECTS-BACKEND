@@ -965,6 +965,186 @@ app.get("/api/user/dashboard", firebaseAuthMiddleware, async (req, res) => {
 });
 
 
+
+
+
+
+// ========== USER BOOKING ENDPOINTS ==========
+// POST /api/bookings - Create a new booking
+app.post("/api/bookings", firebaseAuthMiddleware, async (req, res) => {
+  try {
+    const { ticketId, quantity } = req.body;
+    
+    if (!ticketId || !quantity || quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Ticket ID and quantity are required"
+      });
+    }
+    
+    console.log(`🎟️ Creating booking for user: ${req.mongoUser.email}`);
+    
+    let ticket = null;
+    let newBooking = null;
+    let bookingReference = `BK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    if (mongoose.connection.readyState === 1) {
+      // Find the ticket
+      ticket = await Ticket.findById(ticketId);
+      
+      if (!ticket) {
+        return res.status(404).json({
+          success: false,
+          message: "Ticket not found"
+        });
+      }
+      
+      // Check if ticket is approved and active
+      if (ticket.verified !== "approved" || !ticket.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: "This ticket is not available for booking"
+        });
+      }
+      
+      // Check if ticket has departed
+      if (ticket.departureAt < new Date()) {
+        return res.status(400).json({
+          success: false,
+          message: "This ticket has already departed"
+        });
+      }
+      
+      // Check available quantity
+      if (quantity > ticket.availableQuantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Only ${ticket.availableQuantity} seats available`
+        });
+      }
+      
+      // Calculate total price
+      const totalPrice = ticket.price * quantity;
+      
+      // Create booking
+      newBooking = new Booking({
+        userId: req.mongoUser.uid,
+        userName: req.mongoUser.name,
+        userEmail: req.mongoUser.email,
+        ticketId: ticket._id,
+        ticketTitle: ticket.title,
+        quantity: quantity,
+        totalPrice: totalPrice,
+        status: "pending", // Admin needs to approve
+        bookingReference: bookingReference
+      });
+      
+      await newBooking.save();
+      
+      console.log(`✅ Booking created for user ${req.mongoUser.email}: ${bookingReference}`);
+      
+    } else {
+      // Mock data
+      ticket = {
+        _id: ticketId,
+        title: "Mock Ticket",
+        price: 1200,
+        availableQuantity: 10
+      };
+      
+      const totalPrice = ticket.price * quantity;
+      
+      newBooking = {
+        _id: "mock-booking-id",
+        userId: req.mongoUser.uid,
+        userName: req.mongoUser.name,
+        userEmail: req.mongoUser.email,
+        ticketId: ticketId,
+        ticketTitle: "Mock Ticket",
+        quantity: quantity,
+        totalPrice: totalPrice,
+        status: "pending",
+        bookingReference: bookingReference,
+        createdAt: new Date()
+      };
+      
+      console.log("⚠️ Mock: Booking would be created if DB connected");
+    }
+    
+    res.json({
+      success: true,
+      message: "Booking created successfully! Please wait for admin approval.",
+      data: {
+        booking: newBooking,
+        ticket: ticket
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error creating booking:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error creating booking",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/my-bookings - Get user's bookings
+app.get("/api/my-bookings", firebaseAuthMiddleware, async (req, res) => {
+  try {
+    console.log(`📋 Getting bookings for user: ${req.mongoUser.email}`);
+    
+    let bookings = [];
+    
+    if (mongoose.connection.readyState === 1) {
+      bookings = await Booking.find({ userId: req.mongoUser.uid })
+        .sort({ createdAt: -1 })
+        .populate('ticketId', 'title from to departureAt transportType price vendorName');
+    } else {
+      // Mock data
+      bookings = [
+        {
+          _id: "booking-001",
+          ticketId: {
+            _id: "ticket-001",
+            title: "Dhaka to Chittagong AC Bus",
+            from: "Dhaka",
+            to: "Chittagong",
+            departureAt: new Date(Date.now() + 86400000)
+          },
+          ticketTitle: "Dhaka to Chittagong AC Bus",
+          quantity: 2,
+          totalPrice: 2400,
+          status: "pending",
+          bookingReference: "BK-20240101-001",
+          createdAt: new Date(Date.now() - 86400000)
+        }
+      ];
+    }
+    
+    res.json({
+      success: true,
+      data: { bookings }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching user bookings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching bookings",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+});
+
+
+
+
+
+
+
+
 // ========== VENDOR APPLICATION ENDPOINTS ==========
 // Submit vendor application
 app.post("/api/apply-vendor", firebaseAuthMiddleware, async (req, res) => {
@@ -2250,6 +2430,343 @@ app.get("/api/admin/vendor-applications/:id", firebaseAuthMiddleware, requireRol
     res.status(500).json({
       success: false,
       message: "Error fetching application",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+});
+
+
+
+
+
+
+
+
+// ========== ADMIN BOOKINGS ENDPOINTS ==========
+// GET /api/admin/bookings - Get all bookings for admin panel
+app.get("/api/admin/bookings", firebaseAuthMiddleware, requireRole(["admin"]), async (req, res) => {
+  try {
+    console.log(`📊 Admin bookings accessed by: ${req.mongoUser.email}`);
+    
+    const { 
+      status = "all", 
+      search = "", 
+      startDate, 
+      endDate, 
+      page = 1, 
+      limit = 10 
+    } = req.query;
+    
+    // Build filter object
+    let filter = {};
+    
+    if (status !== "all") {
+      filter.status = status;
+    }
+    
+    if (search) {
+      filter.$or = [
+        { userName: new RegExp(search, "i") },
+        { userEmail: new RegExp(search, "i") },
+        { bookingReference: new RegExp(search, "i") },
+        { ticketTitle: new RegExp(search, "i") }
+      ];
+    }
+    
+    if (startDate && endDate) {
+      filter.createdAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+    
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+    
+    let bookings = [];
+    let total = 0;
+    let stats = {
+      total: 0,
+      pending: 0,
+      confirmed: 0,
+      cancelled: 0,
+      completed: 0,
+      totalRevenue: 0
+    };
+    
+    if (mongoose.connection.readyState === 1) {
+      // Get bookings with pagination
+      bookings = await Booking.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum);
+      
+      total = await Booking.countDocuments(filter);
+      
+      // Get stats by status
+      const statusCounts = await Booking.aggregate([
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            totalRevenue: { $sum: "$totalPrice" }
+          }
+        }
+      ]);
+      
+      // Calculate total revenue from confirmed and completed bookings
+      const revenueStats = await Booking.aggregate([
+        {
+          $match: {
+            status: { $in: ["confirmed", "completed"] }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: "$totalPrice" }
+          }
+        }
+      ]);
+      
+      // Initialize stats
+      stats.total = total;
+      stats.totalRevenue = revenueStats[0]?.totalRevenue || 0;
+      
+      // Fill status counts
+      statusCounts.forEach(item => {
+        if (item._id === "pending") stats.pending = item.count;
+        if (item._id === "confirmed") stats.confirmed = item.count;
+        if (item._id === "cancelled") stats.cancelled = item.count;
+        if (item._id === "completed") stats.completed = item.count;
+      });
+      
+    } else {
+      // Mock data when DB is not connected
+      bookings = [
+        {
+          _id: "booking-001",
+          userId: "user-001",
+          userName: "John Doe",
+          userEmail: "john@example.com",
+          ticketId: {
+            _id: "ticket-001",
+            title: "Dhaka to Chittagong AC Bus",
+            from: "Dhaka",
+            to: "Chittagong",
+            departureAt: new Date(Date.now() + 86400000)
+          },
+          ticketTitle: "Dhaka to Chittagong AC Bus",
+          quantity: 2,
+          totalPrice: 2400,
+          status: "pending",
+          bookingReference: "BK-20240101-001",
+          createdAt: new Date(Date.now() - 86400000),
+          updatedAt: new Date(Date.now() - 86400000)
+        },
+        {
+          _id: "booking-002",
+          userId: "user-002",
+          userName: "Jane Smith",
+          userEmail: "jane@example.com",
+          ticketId: {
+            _id: "ticket-002",
+            title: "Dhaka to Sylhet Train",
+            from: "Dhaka",
+            to: "Sylhet",
+            departureAt: new Date(Date.now() + 172800000)
+          },
+          ticketTitle: "Dhaka to Sylhet Train",
+          quantity: 1,
+          totalPrice: 1800,
+          status: "confirmed",
+          bookingReference: "BK-20240101-002",
+          createdAt: new Date(Date.now() - 43200000),
+          updatedAt: new Date(Date.now() - 43200000)
+        }
+      ];
+      
+      total = bookings.length;
+      stats = {
+        total: 2,
+        pending: 1,
+        confirmed: 1,
+        cancelled: 0,
+        completed: 0,
+        totalRevenue: 4200
+      };
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        bookings,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum)
+        },
+        stats
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching admin bookings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching bookings",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+});
+
+// PUT /api/admin/bookings/:id/status - Update booking status
+app.put("/api/admin/bookings/:id/status", firebaseAuthMiddleware, requireRole(["admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    console.log(`📝 Updating booking ${id} status to: ${status}`);
+    
+    if (!["pending", "confirmed", "cancelled", "completed"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status. Must be: pending, confirmed, cancelled, or completed"
+      });
+    }
+    
+    let updatedBooking = null;
+    
+    if (mongoose.connection.readyState === 1) {
+      // Find and update booking
+      updatedBooking = await Booking.findByIdAndUpdate(
+        id,
+        {
+          status: status,
+          updatedAt: new Date()
+        },
+        { new: true }
+      );
+      
+      if (!updatedBooking) {
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found"
+        });
+      }
+      
+      console.log(`✅ Booking ${id} updated to: ${status}`);
+      
+      // If confirming booking, reduce available quantity on ticket
+      if (status === "confirmed" && updatedBooking.ticketId) {
+        const ticket = await Ticket.findById(updatedBooking.ticketId);
+        if (ticket) {
+          const newAvailable = Math.max(0, ticket.availableQuantity - updatedBooking.quantity);
+          ticket.availableQuantity = newAvailable;
+          await ticket.save();
+          console.log(`✅ Reduced available quantity for ticket ${ticket._id} to ${newAvailable}`);
+        }
+      }
+      
+      // If cancelling a confirmed booking, restore ticket quantity
+      if (status === "cancelled" && updatedBooking.ticketId) {
+        const previousBooking = await Booking.findById(id);
+        if (previousBooking && previousBooking.status === "confirmed") {
+          const ticket = await Ticket.findById(updatedBooking.ticketId);
+          if (ticket) {
+            ticket.availableQuantity = Math.min(
+              ticket.quantity,
+              ticket.availableQuantity + previousBooking.quantity
+            );
+            await ticket.save();
+            console.log(`✅ Restored quantity for ticket ${ticket._id}`);
+          }
+        }
+      }
+      
+    } else {
+      // Mock response
+      updatedBooking = {
+        _id: id,
+        status: status,
+        updatedAt: new Date()
+      };
+      
+      console.log("⚠️ Mock: Booking would be updated if DB connected");
+    }
+    
+    res.json({
+      success: true,
+      message: `Booking status updated to ${status}`,
+      data: { booking: updatedBooking }
+    });
+    
+  } catch (error) {
+    console.error("Error updating booking status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating booking status",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/admin/bookings/:id - Get single booking details
+app.get("/api/admin/bookings/:id", firebaseAuthMiddleware, requireRole(["admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    let booking = null;
+    
+    if (mongoose.connection.readyState === 1) {
+      booking = await Booking.findById(id)
+        .populate('ticketId', 'title from to departureAt transportType price vendorName');
+      
+      if (!booking) {
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found"
+        });
+      }
+    } else {
+      // Mock data
+      booking = {
+        _id: id,
+        userId: "user-001",
+        userName: "John Doe",
+        userEmail: "john@example.com",
+        ticketId: {
+          _id: "ticket-001",
+          title: "Dhaka to Chittagong AC Bus",
+          from: "Dhaka",
+          to: "Chittagong",
+          transportType: "bus",
+          price: 1200,
+          vendorName: "Travel Express",
+          departureAt: new Date(Date.now() + 86400000)
+        },
+        ticketTitle: "Dhaka to Chittagong AC Bus",
+        quantity: 2,
+        totalPrice: 2400,
+        status: "pending",
+        bookingReference: "BK-20240101-001",
+        createdAt: new Date(Date.now() - 86400000),
+        updatedAt: new Date(Date.now() - 86400000)
+      };
+    }
+    
+    res.json({
+      success: true,
+      data: { booking }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching booking details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching booking",
       error: process.env.NODE_ENV === "development" ? error.message : undefined
     });
   }
