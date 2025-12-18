@@ -2780,7 +2780,7 @@ app.get("/api/admin/bookings/:id", firebaseAuthMiddleware, requireRole(["admin"]
 
 
 
-// ========== ERROR HANDLERS ==========
+// ========= ERROR HANDLERS =========
 // 404 handler for undefined routes
 app.use((req, res) => {
   console.log(`🔍 404: ${req.method} ${req.url}`);
