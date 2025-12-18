@@ -1124,7 +1124,7 @@ app.get("/api/my-vendor-application", firebaseAuthMiddleware, async (req, res) =
 
 
 
-// Submit vendor application
+//  vendor application
 app.post("/api/apply-vendor", firebaseAuthMiddleware, async (req, res) => {
   try {
     console.log(`📋 Vendor application submitted by: ${req.mongoUser.email}`);
