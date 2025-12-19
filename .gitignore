@@ -1,3 +1,4 @@
 node_modules
 .env
 "./ticketbari-projects-firebase-adminsdk-fbsvc-1d8b29239b.json"
+.vercel
