@@ -1,112 +1,64 @@
+
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
-const cors = require("cors"); // Added CORS package
 
 const app = express();
 
-// ========== FIXED: IMPROVED CORS CONFIGURATION ==========
-// Use cors middleware with proper configuration
-app.use(
-  cors({
-    origin: [
-      "https://ticketbari-projects.web.app",
-      "http://localhost:5173",
-      "http://localhost:3000",
-    ],
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "Accept",
-      "Origin",
-      "X-Requested-With",
-    ],
-  }),
-);
+// ========== BULLETPROOF CORS CONFIGURATION ==========
+// This MUST be at the VERY BEGINNING, before any other middleware
 
-// Manual CORS headers as fallback
+// 1. Manual CORS middleware for ALL requests
 app.use((req, res, next) => {
-  const allowedOrigins = [
-    "https://ticketbari-projects.web.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-  ];
-
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header("Access-Control-Allow-Origin", origin);
-  }
-
+  // Set CORS headers
+  res.header("Access-Control-Allow-Origin", "https://ticketbari-projects.web.app");
   res.header("Access-Control-Allow-Credentials", "true");
-  res.header(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-  );
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Requested-With, Accept, Origin",
-  );
-
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
+  
   // Handle preflight OPTIONS requests
   if (req.method === "OPTIONS") {
     console.log(`✅ Handling OPTIONS preflight for: ${req.url}`);
     return res.status(200).end();
   }
-
+  
   next();
 });
 
-// FIXED: Body parser middleware with increased limits
-app.use(bodyParser.json({ limit: "10mb" }));
-app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
+// 2. Body parser middleware
+app.use(bodyParser.json());
 
-// Request logging middleware
+// 3. Request logging middleware
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
-  console.log(
-    `[${timestamp}] ${req.method} ${req.url} - Origin: ${req.headers.origin || "none"}`,
-  );
+  console.log(`[${timestamp}] ${req.method} ${req.url} - Origin: ${req.headers.origin || 'none'}`);
   next();
 });
 
-// ========== FIXED: IMPROVED FIREBASE ADMIN INITIALIZATION ==========
+// ========== FIREBASE ADMIN INITIALIZATION ==========
 let firebaseInitialized = false;
 
 try {
   if (!admin.apps.length) {
     if (!process.env.FB_SERVICE_KEY) {
       console.error("❌ FB_SERVICE_KEY missing");
-      console.log("⚠️ Running in development mode with mock authentication");
     } else {
-      try {
-        const decoded = Buffer.from(
-          process.env.FB_SERVICE_KEY,
-          "base64",
-        ).toString("utf8");
+      const decoded = Buffer.from(
+        process.env.FB_SERVICE_KEY,
+        "base64"
+      ).toString("utf8");
 
-        const serviceAccount = JSON.parse(decoded);
+      const serviceAccount = JSON.parse(decoded);
 
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-        });
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
 
-        firebaseInitialized = true;
-        console.log("✅ Firebase Admin initialized successfully");
-      } catch (firebaseError) {
-        console.error(
-          "❌ Firebase initialization failed:",
-          firebaseError.message,
-        );
-        console.log("⚠️ Running with mock authentication");
-      }
+      firebaseInitialized = true;
+      console.log("✅ Firebase Admin initialized");
     }
-  } else {
-    firebaseInitialized = true;
-    console.log("✅ Firebase already initialized");
   }
 } catch (error) {
   console.error("❌ Firebase init error:", error.message);
@@ -114,17 +66,10 @@ try {
 
 // Create mock Firebase admin for development
 if (!firebaseInitialized) {
-  console.log("🛠️ Creating mock Firebase admin for development");
   global.firebaseAdminMock = {
     auth: () => ({
       verifyIdToken: async (idToken, checkRevoked = false) => {
-        console.log("🛠️ Mock Firebase token verification called");
-
-        // FIXED: Better token parsing
-        if (!idToken || typeof idToken !== "string") {
-          console.log("❌ Mock: Invalid token format");
-          throw new Error("Invalid token");
-        }
+        console.log("🛠️ Mock Firebase token verification");
 
         // Try to decode as JWT
         if (
@@ -134,28 +79,23 @@ if (!firebaseInitialized) {
         ) {
           try {
             const parts = idToken.split(".");
-            // FIXED: Handle base64 decoding safely
             const header = JSON.parse(
-              Buffer.from(parts[0], "base64").toString("utf8"),
+              Buffer.from(parts[0], "base64").toString()
             );
             const payload = JSON.parse(
-              Buffer.from(parts[1], "base64").toString("utf8"),
+              Buffer.from(parts[1], "base64").toString()
             );
 
             console.log("✅ Mock decoded JWT:", {
               alg: header.alg,
-              email:
-                payload.email || payload.user_email || "unknown@example.com",
-              uid: payload.user_id || payload.sub || `mock-uid-${Date.now()}`,
+              email: payload.email || payload.user_email,
+              uid: payload.user_id || payload.sub,
             });
 
             return {
               uid: payload.user_id || payload.sub || `mock-uid-${Date.now()}`,
               email: payload.email || payload.user_email || "user@example.com",
-              email_verified:
-                payload.email_verified !== undefined
-                  ? payload.email_verified
-                  : true,
+              email_verified: true,
               name:
                 payload.name ||
                 (payload.email ? payload.email.split("@")[0] : "User"),
@@ -165,13 +105,10 @@ if (!firebaseInitialized) {
           }
         }
 
-        // FIXED: Better fallback logic
+        // Fallback: treat token as email or generate mock user
         let email = "user@example.com";
-        let name = "User";
-
         if (idToken && idToken.includes("@")) {
           email = idToken;
-          name = email.split("@")[0];
         }
 
         // Special case for admin email
@@ -181,56 +118,34 @@ if (!firebaseInitialized) {
           uid: `mock-uid-${Date.now()}`,
           email: email,
           email_verified: true,
-          name: name,
-          admin: isAdminEmail,
+          name: email.split("@")[0],
+          admin: isAdminEmail, // Add admin flag for mock mode
         };
       },
     }),
   };
-  console.log("✅ Mock Firebase admin created");
 }
 
-// ========== FIXED: DATABASE CONNECTION WITH BETTER ERROR HANDLING ==========
+// ========== DATABASE CONNECTION ==========
 mongoose.set("strictQuery", false);
 const MONGO_URI =
   process.env.MONGO_URI || "mongodb://127.0.0.1:27017/ticketbari";
 
 console.log("🔗 Connecting to MongoDB...");
 
-// FIXED: Improved MongoDB connection with retry logic
-const connectDB = async () => {
-  try {
-    await mongoose.connect(MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-    });
+mongoose
+  .connect(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000,
+  })
+  .then(() => {
     console.log("✅ MongoDB Connected Successfully");
-    return true;
-  } catch (err) {
+  })
+  .catch((err) => {
     console.error("❌ MongoDB connection failed:", err.message);
-    console.log("⚠️ Running without database connection...");
-    console.log("📋 Note: Some features requiring database will use mock data");
-    return false;
-  }
-};
-
-// Start connection
-connectDB();
-
-// Connection events
-mongoose.connection.on("connected", () => {
-  console.log("✅ Mongoose connected to DB");
-});
-
-mongoose.connection.on("error", (err) => {
-  console.error("❌ Mongoose connection error:", err.message);
-});
-
-mongoose.connection.on("disconnected", () => {
-  console.log("⚠️ Mongoose disconnected from DB");
-});
+    console.log("⚠️ Running without database...");
+  });
 
 // ========== MONGOOSE SCHEMAS & MODELS ==========
 const { Schema } = mongoose;
@@ -269,7 +184,7 @@ const userSchema = new Schema(
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 // Ticket Schema
@@ -313,7 +228,7 @@ const ticketSchema = new Schema(
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 // Booking Schema
@@ -341,7 +256,7 @@ const bookingSchema = new Schema(
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 // Vendor Application Schema
@@ -369,7 +284,7 @@ const vendorApplicationSchema = new Schema(
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 // Models
@@ -378,10 +293,10 @@ const Ticket = mongoose.model("Ticket", ticketSchema);
 const Booking = mongoose.model("Booking", bookingSchema);
 const VendorApplication = mongoose.model(
   "VendorApplication",
-  vendorApplicationSchema,
+  vendorApplicationSchema
 );
 
-// ========== FIXED: IMPROVED AUTHENTICATION MIDDLEWARE ==========
+// ========== AUTHENTICATION MIDDLEWARE ==========
 async function firebaseAuthMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -398,7 +313,6 @@ async function firebaseAuthMiddleware(req, res, next) {
   // Check if it's a Bearer token
   if (!authHeader.startsWith("Bearer ")) {
     console.log("🔴 Invalid authorization format. Expected 'Bearer <token>'");
-    console.log("Received header:", authHeader.substring(0, 50) + "...");
     return res.status(401).json({
       success: false,
       message: "Invalid authorization format. Expected 'Bearer <token>'",
@@ -420,8 +334,8 @@ async function firebaseAuthMiddleware(req, res, next) {
 
   console.log(`🔑 Token received: ${idToken.length} characters`);
 
-  // FIXED: Better token validation
-  if (idToken.length < 10) {
+  // Basic token validation
+  if (idToken.length < 50) {
     console.log("❌ Token too short (likely invalid)");
     return res.status(401).json({
       success: false,
@@ -434,20 +348,17 @@ async function firebaseAuthMiddleware(req, res, next) {
     let decodedToken;
     let authMethod = "unknown";
 
-    // FIXED: Try Firebase Admin verification if initialized
+    // Try Firebase Admin verification if initialized
     if (firebaseInitialized && admin.apps.length > 0) {
       authMethod = "firebase_admin";
       try {
-        decodedToken = await admin.auth().verifyIdToken(idToken, true);
+        decodedToken = await admin.auth().verifyIdToken(idToken);
         console.log(
-          `✅ Firebase Admin verification successful for: ${decodedToken.email}`,
-        );
-        console.log(
-          `   UID: ${decodedToken.uid}, Verified: ${decodedToken.email_verified}`,
+          `✅ Firebase Admin verification successful for: ${decodedToken.email}`
         );
       } catch (firebaseError) {
         console.log(
-          `❌ Firebase Admin verification failed: ${firebaseError.code} - ${firebaseError.message}`,
+          `❌ Firebase Admin verification failed: ${firebaseError.code} - ${firebaseError.message}`
         );
 
         // Handle specific Firebase errors
@@ -463,108 +374,82 @@ async function firebaseAuthMiddleware(req, res, next) {
           console.log("⚠️ Token argument error - trying JWT decode...");
           authMethod = "jwt_decode";
         } else {
-          // Don't throw, try mock mode instead
-          console.log("⚠️ Firebase error, falling back to mock mode...");
-          authMethod = "mock_fallback";
+          throw firebaseError;
         }
       }
-    } else {
-      authMethod = "mock_no_firebase";
-      console.log("⚠️ Firebase not initialized, using mock authentication");
     }
 
-    // FIXED: If Firebase failed or not initialized, try to decode as JWT
-    if (
-      !decodedToken &&
-      (authMethod === "jwt_decode" ||
-        authMethod === "mock_no_firebase" ||
-        authMethod === "mock_fallback")
-    ) {
+    // If Firebase failed or not initialized, try to decode as JWT
+    if (!decodedToken && authMethod === "jwt_decode") {
       try {
         // Check if it looks like a JWT
         if (idToken.includes(".") && idToken.split(".").length === 3) {
           const parts = idToken.split(".");
 
-          // FIXED: Safer base64 decoding
-          try {
-            const header = JSON.parse(
-              Buffer.from(parts[0], "base64").toString(),
-            );
-            const payload = JSON.parse(
-              Buffer.from(parts[1], "base64").toString(),
-            );
+          // Decode header
+          const header = JSON.parse(Buffer.from(parts[0], "base64").toString());
+          const payload = JSON.parse(
+            Buffer.from(parts[1], "base64").toString()
+          );
 
-            console.log(
-              `✅ JWT decoded successfully: ${payload.email || payload.user_email || "no email"}`,
-            );
+          console.log(
+            `✅ JWT decoded successfully: ${payload.email || "no email"}`
+          );
 
-            decodedToken = {
-              uid: payload.user_id || payload.sub || `jwt-uid-${Date.now()}`,
-              email: payload.email || payload.user_email || "user@example.com",
-              email_verified:
-                payload.email_verified !== undefined
-                  ? payload.email_verified
-                  : true,
-              name:
-                payload.name ||
-                (payload.email ? payload.email.split("@")[0] : "User"),
-              picture: payload.picture,
-              iss: payload.iss,
-              aud: payload.aud,
-              iat: payload.iat,
-              exp: payload.exp,
-            };
+          decodedToken = {
+            uid: payload.user_id || payload.sub || `jwt-uid-${Date.now()}`,
+            email: payload.email || payload.user_email || "user@example.com",
+            email_verified: payload.email_verified || true,
+            name:
+              payload.name ||
+              (payload.email ? payload.email.split("@")[0] : "User"),
+            picture: payload.picture,
+            iss: payload.iss,
+            aud: payload.aud,
+            iat: payload.iat,
+            exp: payload.exp,
+          };
 
-            authMethod = "jwt_decode";
-          } catch (decodeError) {
-            console.log(`❌ JWT decode failed: ${decodeError.message}`);
-            authMethod = "mock";
-          }
-        } else {
-          authMethod = "mock";
+          authMethod = "jwt_decode";
         }
-      } catch (error) {
-        console.log(`❌ JWT processing error: ${error.message}`);
+      } catch (decodeError) {
+        console.log(`❌ JWT decode failed: ${decodeError.message}`);
         authMethod = "mock";
       }
     }
 
-    // FIXED: Fallback to mock verification
+    // Fallback to mock verification
     if (!decodedToken) {
       authMethod = "mock";
       console.log("🛠️ Using mock authentication");
 
-      // Try to extract email from token
+      // Try to extract email from token if possible
       let email = "user@example.com";
-      let name = "User";
 
-      // Try to decode JWT from Firebase token
+      // FIRST: Try to decode JWT from Firebase token
       if (idToken.includes(".") && idToken.split(".").length === 3) {
         try {
           const parts = idToken.split(".");
           const payload = JSON.parse(
-            Buffer.from(parts[1], "base64").toString(),
+            Buffer.from(parts[1], "base64").toString()
           );
 
           if (payload.email) {
             email = payload.email;
-            name = payload.name || email.split("@")[0];
             console.log(`✅ Decoded email from JWT in mock mode: ${email}`);
           } else if (payload.user_email) {
             email = payload.user_email;
-            name = payload.name || email.split("@")[0];
             console.log(
-              `✅ Decoded user_email from JWT in mock mode: ${email}`,
+              `✅ Decoded user_email from JWT in mock mode: ${email}`
             );
           }
         } catch (e) {
           console.log("⚠️ Could not decode JWT in mock mode:", e.message);
         }
       }
-      // Check if token itself is an email
+      // SECOND: Check if token itself is an email
       else if (idToken.includes("@")) {
         email = idToken;
-        name = email.split("@")[0];
       }
 
       console.log(`📧 Mock auth using email: ${email}`);
@@ -573,29 +458,25 @@ async function firebaseAuthMiddleware(req, res, next) {
         uid: `mock-uid-${Date.now()}`,
         email: email,
         email_verified: true,
-        name: name,
+        name: email.split("@")[0],
         auth_method: "mock",
       };
 
-      // FIXED: Check MongoDB for existing user with this email
-      const dbConnected = mongoose.connection.readyState === 1;
-      if (dbConnected) {
+      // SPECIAL FIX: Check MongoDB for existing user with this email
+      if (mongoose.connection.readyState === 1) {
         try {
-          const existingUser = await User.findOne({
-            email: email.toLowerCase(),
-          });
+          const existingUser = await User.findOne({ email: email });
           if (existingUser) {
             console.log(
-              `✅ Found existing user in MongoDB for email: ${email}`,
+              `✅ Found existing user in MongoDB for email: ${email}`
             );
             console.log(
-              `   UID: ${existingUser.uid}, Role: ${existingUser.role}`,
+              `   UID: ${existingUser.uid}, Role: ${existingUser.role}`
             );
 
             // Use the real UID from MongoDB instead of mock UID
             decodedToken.uid = existingUser.uid;
-            decodedToken.name = existingUser.name || name;
-            decodedToken.email_verified = existingUser.emailVerified || true;
+            decodedToken.name = existingUser.name || email.split("@")[0];
             decodedToken.picture = existingUser.photoURL;
             decodedToken.auth_method = "mock_with_real_data";
 
@@ -604,112 +485,81 @@ async function firebaseAuthMiddleware(req, res, next) {
         } catch (dbError) {
           console.log("⚠️ Could not check MongoDB:", dbError.message);
         }
-      } else {
-        console.log("⚠️ MongoDB not connected, using mock data only");
       }
     }
 
     console.log(
-      `✅ Authentication successful via ${authMethod}: ${decodedToken.email}`,
+      `✅ Authentication successful via ${authMethod}: ${decodedToken.email}`
     );
 
     // Find or create user in database
     let user = null;
-    const dbConnected = mongoose.connection.readyState === 1;
 
-    if (dbConnected) {
-      try {
-        // FIRST: Try to find by email (more reliable than UID)
-        user = await User.findOne({ email: decodedToken.email.toLowerCase() });
+    if (mongoose.connection.readyState === 1) {
+      // FIRST: Try to find by UID
+      user = await User.findOne({ uid: decodedToken.uid });
 
-        // SECOND: If not found by email, try by UID
-        if (!user) {
-          user = await User.findOne({ uid: decodedToken.uid });
-        }
+      // SECOND: If not found by UID, try by email
+      if (!user) {
+        user = await User.findOne({ email: decodedToken.email });
 
-        // THIRD: If found but UID is different, update the UID
+        // If found by email but UID is different, update the UID
         if (user && user.uid !== decodedToken.uid) {
           console.log(
-            `🔄 Updating UID for ${user.email}: ${user.uid} → ${decodedToken.uid}`,
+            `🔄 Updating UID for ${user.email}: ${user.uid} → ${decodedToken.uid}`
           );
           user.uid = decodedToken.uid;
           await user.save();
         }
+      }
 
-        // FOURTH: If still not found, create new user
-        if (!user) {
-          console.log(`👤 Creating new user: ${decodedToken.email}`);
+      // THIRD: If still not found, create new user
+      if (!user) {
+        console.log(`👤 Creating new user: ${decodedToken.email}`);
 
-          // FIXED: Set role based on email
-          let role = "user";
-          if (
-            decodedToken.email === "mahdiashan9@gmail.com" ||
-            decodedToken.email === "islameshan451@gmail.com"
-          ) {
-            role = "admin";
-            console.log(`⭐ Setting ${decodedToken.email} as admin`);
-          }
-
-          user = new User({
-            uid: decodedToken.uid,
-            email: decodedToken.email.toLowerCase(),
-            name: decodedToken.name || decodedToken.email.split("@")[0],
-            photoURL: decodedToken.picture || decodedToken.photoURL,
-            emailVerified: decodedToken.email_verified || false,
-            role: role,
-            lastLogin: new Date(),
-          });
-
-          await user.save();
-          console.log(`✅ User created: ${user.email} (${user.role})`);
-        } else {
-          console.log(`✅ User found: ${user.email} (${user.role})`);
-
-          // FIXED: Update admin status if needed
-          if (
-            (user.email === "mahdiashan9@gmail.com" ||
-              user.email === "islameshan451@gmail.com") &&
-            user.role !== "admin"
-          ) {
-            console.log(`⭐ Upgrading ${user.email} to admin role`);
-            user.role = "admin";
-          }
-
-          // Update user info if needed
-          const needsUpdate =
-            (decodedToken.name && user.name !== decodedToken.name) ||
-            (decodedToken.picture && user.photoURL !== decodedToken.picture) ||
-            user.emailVerified !== (decodedToken.email_verified || false);
-
-          if (needsUpdate) {
-            if (decodedToken.name) user.name = decodedToken.name;
-            if (decodedToken.picture) user.photoURL = decodedToken.picture;
-            user.emailVerified = decodedToken.email_verified || false;
-          }
-
-          user.lastLogin = new Date();
-          await user.save();
+        // Set role based on email
+        let role = "user";
+        if (decodedToken.email === "mahdiashan9@gmail.com") {
+          role = "admin";
+          console.log(`⭐ Setting ${decodedToken.email} as admin`);
         }
-      } catch (dbError) {
-        console.error(
-          "❌ Database error during user lookup/creation:",
-          dbError.message,
-        );
-        // Use mock user if DB fails
-        user = {
-          _id: "mock-id",
+
+        user = new User({
           uid: decodedToken.uid,
           email: decodedToken.email,
           name: decodedToken.name || decodedToken.email.split("@")[0],
-          photoURL: decodedToken.picture,
-          role:
-            decodedToken.email === "mahdiashan9@gmail.com" ||
-            decodedToken.email === "islameshan451@gmail.com"
-              ? "admin"
-              : "user",
-          emailVerified: decodedToken.email_verified || true,
+          photoURL: decodedToken.picture || decodedToken.photoURL,
+          emailVerified: decodedToken.email_verified || false,
+          role: role,
           lastLogin: new Date(),
-        };
+        });
+
+        await user.save();
+        console.log(`✅ User created: ${user.email} (${user.role})`);
+      } else {
+        console.log(`✅ User found: ${user.email} (${user.role})`);
+
+        // SPECIAL FIX: If user is mahdiashan9@gmail.com and not admin, update to admin
+        if (user.email === "mahdiashan9@gmail.com" && user.role !== "admin") {
+          console.log(`⭐ Upgrading ${user.email} to admin role`);
+          user.role = "admin";
+        }
+
+        // Update last login and user info if needed
+        const needsUpdate =
+          user.name !==
+            (decodedToken.name || decodedToken.email.split("@")[0]) ||
+          user.photoURL !== (decodedToken.picture || decodedToken.photoURL) ||
+          user.emailVerified !== (decodedToken.email_verified || false);
+
+        if (needsUpdate) {
+          user.name = decodedToken.name || decodedToken.email.split("@")[0];
+          user.photoURL = decodedToken.picture || decodedToken.photoURL;
+          user.emailVerified = decodedToken.email_verified || false;
+        }
+
+        user.lastLogin = new Date();
+        await user.save();
       }
     } else {
       // Database not connected, use mock user
@@ -720,11 +570,7 @@ async function firebaseAuthMiddleware(req, res, next) {
         email: decodedToken.email,
         name: decodedToken.name || decodedToken.email.split("@")[0],
         photoURL: decodedToken.picture,
-        role:
-          decodedToken.email === "mahdiashan9@gmail.com" ||
-          decodedToken.email === "islameshan451@gmail.com"
-            ? "admin"
-            : "user",
+        role: decodedToken.email === "mahdiashan9@gmail.com" ? "admin" : "user",
         emailVerified: decodedToken.email_verified || true,
         lastLogin: new Date(),
       };
@@ -745,7 +591,6 @@ async function firebaseAuthMiddleware(req, res, next) {
       message: "Authentication failed",
       code: "AUTH_FAILED",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-      suggestion: "Please check your token and try logging in again",
     });
   }
 }
@@ -763,14 +608,11 @@ const requireRole = (roles) => {
     }
 
     if (!roles.includes(req.mongoUser.role)) {
-      console.log(
-        `🔒 Access denied for ${req.mongoUser.email}: Required role: ${roles.join(", ")}, Current role: ${req.mongoUser.role}`,
-      );
       return res.status(403).json({
         success: false,
-        message: `Access denied. Required role: ${roles.join(", ")}. Your role: ${req.mongoUser.role}`,
-        currentRole: req.mongoUser.role,
-        requiredRoles: roles,
+        message: `Access denied. Required role: ${roles.join(
+          ", "
+        )}. Your role: ${req.mongoUser.role}`,
       });
     }
 
@@ -778,7 +620,7 @@ const requireRole = (roles) => {
   };
 };
 
-// ========== FIXED: PUBLIC ROUTES ==========
+// ========== PUBLIC ROUTES ==========
 app.get("/", (req, res) => {
   res.json({
     success: true,
@@ -799,7 +641,6 @@ app.get("/", (req, res) => {
       ],
     },
     adminEmail: "mahdiashan9@gmail.com",
-    islameshan451Email: "islameshan451@gmail.com",
   });
 });
 
@@ -817,12 +658,12 @@ app.get("/api/health", async (req, res) => {
     },
     memory: {
       rss: `${Math.round(process.memoryUsage().rss / 1024 / 1024)} MB`,
-      heapTotal: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)} MB`,
-      heapUsed: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`,
-    },
-    environment: {
-      node: process.version,
-      platform: process.platform,
+      heapTotal: `${Math.round(
+        process.memoryUsage().heapTotal / 1024 / 1024
+      )} MB`,
+      heapUsed: `${Math.round(
+        process.memoryUsage().heapUsed / 1024 / 1024
+      )} MB`,
     },
   };
   res.json(health);
@@ -900,7 +741,6 @@ app.get("/api/tickets", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching tickets",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });
@@ -1009,73 +849,12 @@ app.get("/api/tickets/:id", async (req, res) => {
   }
 });
 
-// FIXED: Add search tickets endpoint
-app.get("/api/tickets/search", async (req, res) => {
-  try {
-    const { q } = req.query;
-
-    if (!q || q.trim() === "") {
-      return res.json({
-        success: true,
-        data: { tickets: [] },
-      });
-    }
-
-    let tickets = [];
-
-    if (mongoose.connection.readyState === 1) {
-      tickets = await Ticket.find({
-        $or: [
-          { title: { $regex: q, $options: "i" } },
-          { from: { $regex: q, $options: "i" } },
-          { to: { $regex: q, $options: "i" } },
-          { description: { $regex: q, $options: "i" } },
-        ],
-        verified: "approved",
-        isActive: true,
-        departureAt: { $gt: new Date() },
-      }).limit(20);
-    } else {
-      // Mock search results
-      tickets = [
-        {
-          _id: "search-1",
-          title: `Search result for "${q}"`,
-          from: "Dhaka",
-          to: "Chittagong",
-          transportType: "bus",
-          price: 1200,
-          quantity: 40,
-          availableQuantity: 25,
-          image:
-            "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=500",
-          vendorName: "Travel Express",
-          verified: "approved",
-          isActive: true,
-          departureAt: new Date(Date.now() + 86400000),
-        },
-      ];
-    }
-
-    res.json({
-      success: true,
-      data: { tickets },
-    });
-  } catch (error) {
-    console.error("Error searching tickets:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error searching tickets",
-    });
-  }
-});
-
-// ========== FIXED: USER ROUTES ==========
+// ========== USER ROUTES ==========
 // User profile endpoint
 app.get("/api/user/profile", firebaseAuthMiddleware, async (req, res) => {
   try {
     console.log(
-      `📋 Returning profile for: ${req.mongoUser.email} (via ${req.authMethod})`,
+      `📋 Returning profile for: ${req.mongoUser.email} (via ${req.authMethod})`
     );
 
     res.json({
@@ -1108,7 +887,7 @@ app.get("/api/user/profile", firebaseAuthMiddleware, async (req, res) => {
 app.get("/api/user/dashboard", firebaseAuthMiddleware, async (req, res) => {
   try {
     console.log(
-      `📊 User dashboard accessed by: ${req.mongoUser.email} (${req.mongoUser.role})`,
+      `📊 User dashboard accessed by: ${req.mongoUser.email} (${req.mongoUser.role})`
     );
 
     let stats = {
@@ -1175,7 +954,7 @@ app.get("/api/user/dashboard", firebaseAuthMiddleware, async (req, res) => {
             updatedAt: booking.updatedAt,
             ticketDetails: ticketDetails,
           };
-        }),
+        })
       );
     } else {
       // Mock data for when DB is not connected
@@ -1251,114 +1030,7 @@ app.get("/api/user/dashboard", firebaseAuthMiddleware, async (req, res) => {
   }
 });
 
-// FIXED: Get user's bookings - CORRECTED ENDPOINT
-app.get("/api/user/bookings", firebaseAuthMiddleware, async (req, res) => {
-  try {
-    console.log(`📋 Getting bookings for user: ${req.mongoUser.email}`);
-
-    let bookings = [];
-
-    if (mongoose.connection.readyState === 1) {
-      bookings = await Booking.find({ userId: req.mongoUser.uid })
-        .sort({ createdAt: -1 })
-        .populate(
-          "ticketId",
-          "title from to departureAt transportType price vendorName",
-        );
-    } else {
-      // Mock data
-      bookings = [
-        {
-          _id: "booking-001",
-          ticketId: {
-            _id: "ticket-001",
-            title: "Dhaka to Chittagong AC Bus",
-            from: "Dhaka",
-            to: "Chittagong",
-            departureAt: new Date(Date.now() + 86400000),
-          },
-          ticketTitle: "Dhaka to Chittagong AC Bus",
-          quantity: 2,
-          totalPrice: 2400,
-          status: "pending",
-          bookingReference: "BK-20240101-001",
-          createdAt: new Date(Date.now() - 86400000),
-        },
-      ];
-    }
-
-    res.json({
-      success: true,
-      data: { bookings },
-    });
-  } catch (error) {
-    console.error("Error fetching user bookings:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching bookings",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-});
-
-// FIXED: Get single booking by ID for user
-app.get("/api/user/bookings/:id", firebaseAuthMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`📋 Getting booking ${id} for user: ${req.mongoUser.email}`);
-
-    let booking = null;
-
-    if (mongoose.connection.readyState === 1) {
-      booking = await Booking.findOne({
-        _id: id,
-        userId: req.mongoUser.uid,
-      }).populate(
-        "ticketId",
-        "title from to departureAt transportType price vendorName",
-      );
-
-      if (!booking) {
-        return res.status(404).json({
-          success: false,
-          message: "Booking not found or access denied",
-        });
-      }
-    } else {
-      // Mock data
-      booking = {
-        _id: id,
-        ticketId: {
-          _id: "ticket-001",
-          title: "Dhaka to Chittagong AC Bus",
-          from: "Dhaka",
-          to: "Chittagong",
-          departureAt: new Date(Date.now() + 86400000),
-        },
-        ticketTitle: "Dhaka to Chittagong AC Bus",
-        quantity: 2,
-        totalPrice: 2400,
-        status: "pending",
-        bookingReference: "BK-20240101-001",
-        createdAt: new Date(Date.now() - 86400000),
-      };
-    }
-
-    res.json({
-      success: true,
-      data: { booking },
-    });
-  } catch (error) {
-    console.error("Error fetching booking:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching booking",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-});
-
-// ========== FIXED: USER BOOKING ENDPOINTS ==========
+// ========== USER BOOKING ENDPOINTS ==========
 // POST /api/bookings - Create a new booking
 app.post("/api/bookings", firebaseAuthMiddleware, async (req, res) => {
   try {
@@ -1375,7 +1047,9 @@ app.post("/api/bookings", firebaseAuthMiddleware, async (req, res) => {
 
     let ticket = null;
     let newBooking = null;
-    let bookingReference = `BK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    let bookingReference = `BK-${Date.now()}-${Math.floor(
+      Math.random() * 1000
+    )}`;
 
     if (mongoose.connection.readyState === 1) {
       // Find the ticket
@@ -1431,7 +1105,7 @@ app.post("/api/bookings", firebaseAuthMiddleware, async (req, res) => {
       await newBooking.save();
 
       console.log(
-        `✅ Booking created for user ${req.mongoUser.email}: ${bookingReference}`,
+        `✅ Booking created for user ${req.mongoUser.email}: ${bookingReference}`
       );
     } else {
       // Mock data
@@ -1479,90 +1153,66 @@ app.post("/api/bookings", firebaseAuthMiddleware, async (req, res) => {
   }
 });
 
-// FIXED: Cancel booking
-app.delete("/api/bookings/:id", firebaseAuthMiddleware, async (req, res) => {
+// GET /api/my-bookings - Get user's bookings
+app.get("/api/my-bookings", firebaseAuthMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
-    console.log(`🗑️ Cancelling booking ${id} for user: ${req.mongoUser.email}`);
+    console.log(`📋 Getting bookings for user: ${req.mongoUser.email}`);
+
+    let bookings = [];
 
     if (mongoose.connection.readyState === 1) {
-      // Find booking
-      const booking = await Booking.findOne({
-        _id: id,
-        userId: req.mongoUser.uid,
-      });
-
-      if (!booking) {
-        return res.status(404).json({
-          success: false,
-          message: "Booking not found or access denied",
-        });
-      }
-
-      // Update status to cancelled
-      booking.status = "cancelled";
-      booking.updatedAt = new Date();
-      await booking.save();
-
-      console.log(`✅ Booking cancelled: ${booking.bookingReference}`);
-
-      res.json({
-        success: true,
-        message: "Booking cancelled successfully",
-        data: { booking },
-      });
+      bookings = await Booking.find({ userId: req.mongoUser.uid })
+        .sort({ createdAt: -1 })
+        .populate(
+          "ticketId",
+          "title from to departureAt transportType price vendorName"
+        );
     } else {
-      // Mock response
-      console.log("⚠️ Mock: Booking would be cancelled if DB connected");
-
-      res.json({
-        success: true,
-        message: "Mock: Booking cancelled successfully",
-        data: {
-          booking: {
-            _id: id,
-            status: "cancelled",
-            updatedAt: new Date(),
+      // Mock data
+      bookings = [
+        {
+          _id: "booking-001",
+          ticketId: {
+            _id: "ticket-001",
+            title: "Dhaka to Chittagong AC Bus",
+            from: "Dhaka",
+            to: "Chittagong",
+            departureAt: new Date(Date.now() + 86400000),
           },
+          ticketTitle: "Dhaka to Chittagong AC Bus",
+          quantity: 2,
+          totalPrice: 2400,
+          status: "pending",
+          bookingReference: "BK-20240101-001",
+          createdAt: new Date(Date.now() - 86400000),
         },
-      });
+      ];
     }
+
+    res.json({
+      success: true,
+      data: { bookings },
+    });
   } catch (error) {
-    console.error("Error cancelling booking:", error);
+    console.error("Error fetching user bookings:", error);
     res.status(500).json({
       success: false,
-      message: "Error cancelling booking",
+      message: "Error fetching bookings",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });
 
-// FIXED: Keep old endpoint for compatibility
-app.get("/api/my-bookings", firebaseAuthMiddleware, async (req, res) => {
-  try {
-    console.log(
-      `📋 Getting bookings for user (compatibility endpoint): ${req.mongoUser.email}`,
-    );
-    return res.redirect(307, "/api/user/bookings");
-  } catch (error) {
-    console.error("Error in compatibility endpoint:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching bookings",
-    });
-  }
-});
-
-// ========== FIXED: VENDOR ROUTES ==========
+// ========== VENDOR ROUTES ==========
 // Vendor dashboard stats
 app.get(
   "/api/vendor/dashboard/stats",
   firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
+  requireRole(["vendor"]),
   async (req, res) => {
     try {
       console.log(
-        `📊 Vendor dashboard stats requested by: ${req.mongoUser.email}`,
+        `📊 Vendor dashboard stats requested by: ${req.mongoUser.email}`
       );
 
       let stats = {
@@ -1579,7 +1229,7 @@ app.get(
 
         // Count pending applications for vendor's cards
         const vendorCards = await Ticket.find({ vendorId: vendorId }).select(
-          "_id",
+          "_id"
         );
         const cardIds = vendorCards.map((card) => card._id);
 
@@ -1625,14 +1275,14 @@ app.get(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
+  }
 );
 
 // Get vendor's cards/tickets
 app.get(
   "/api/vendor/cards",
   firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
+  requireRole(["vendor"]),
   async (req, res) => {
     try {
       console.log(`🎟️ Vendor cards requested by: ${req.mongoUser.email}`);
@@ -1662,6 +1312,21 @@ app.get(
             isActive: true,
             createdAt: new Date(),
           },
+          {
+            _id: "card-2",
+            title: "Football Match - National Cup",
+            description: "Final match of national football cup",
+            price: 30,
+            category: "sports",
+            location: "Bangabandhu Stadium",
+            availableSlots: 10,
+            startDate: new Date(Date.now() + 86400000 * 3),
+            endDate: new Date(Date.now() + 86400000 * 3 + 3600000 * 2),
+            status: "active",
+            verified: "approved",
+            isActive: true,
+            createdAt: new Date(Date.now() - 86400000),
+          },
         ];
       }
 
@@ -1678,71 +1343,14 @@ app.get(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
-);
-
-// Get single vendor card by ID
-app.get(
-  "/api/vendor/cards/:id",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log(`🎟️ Getting vendor card ${id} for: ${req.mongoUser.email}`);
-
-      let card = null;
-
-      if (mongoose.connection.readyState === 1) {
-        card = await Ticket.findOne({
-          _id: id,
-          vendorId: req.mongoUser.uid,
-        });
-
-        if (!card) {
-          return res.status(404).json({
-            success: false,
-            message: "Card not found or access denied",
-          });
-        }
-      } else {
-        // Mock data
-        card = {
-          _id: id,
-          title: "Sample Vendor Card",
-          description: "This is a sample card",
-          price: 100,
-          category: "event",
-          location: "Sample Location",
-          availableSlots: 10,
-          startDate: new Date(),
-          endDate: new Date(Date.now() + 86400000),
-          status: "active",
-          verified: "approved",
-          isActive: true,
-          createdAt: new Date(),
-        };
-      }
-
-      res.json({
-        success: true,
-        data: { card },
-      });
-    } catch (error) {
-      console.error("Error fetching vendor card:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching card",
-      });
-    }
-  },
+  }
 );
 
 // Create new card/ticket (vendor)
 app.post(
   "/api/vendor/cards",
   firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
+  requireRole(["vendor"]),
   async (req, res) => {
     try {
       console.log(`➕ Creating new card for vendor: ${req.mongoUser.email}`);
@@ -1759,7 +1367,16 @@ app.post(
       } = req.body;
 
       // Validate required fields
-      if (!title || !description || !price || !location || !availableSlots) {
+      if (
+        !title ||
+        !description ||
+        !price ||
+        !category ||
+        !location ||
+        !availableSlots ||
+        !startDate ||
+        !endDate
+      ) {
         return res.status(400).json({
           success: false,
           message: "Please fill all required fields",
@@ -1774,14 +1391,15 @@ app.post(
           title: title,
           description: description,
           price: parseFloat(price),
-          category: category || "event",
+          category: category,
           location: location,
           quantity: parseInt(availableSlots),
           availableQuantity: parseInt(availableSlots),
-          departureAt: new Date(startDate || Date.now() + 86400000),
+          departureAt: new Date(startDate),
+          endDate: new Date(endDate),
           vendorId: req.mongoUser.uid,
           vendorName: req.mongoUser.name || req.mongoUser.email.split("@")[0],
-          transportType: "bus", // Default
+          transportType: "event",
           from: location,
           to: location,
           verified: "pending",
@@ -1797,11 +1415,11 @@ app.post(
           title,
           description,
           price: parseFloat(price),
-          category: category || "event",
+          category,
           location,
           availableSlots: parseInt(availableSlots),
-          startDate: new Date(startDate || Date.now() + 86400000),
-          endDate: new Date(endDate || Date.now() + 86400000 * 2),
+          startDate: new Date(startDate),
+          endDate: new Date(endDate),
           status: "pending",
           createdAt: new Date(),
         };
@@ -1823,137 +1441,19 @@ app.post(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
-);
-
-// Update vendor card
-app.put(
-  "/api/vendor/cards/:id",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log(`✏️ Updating vendor card ${id} for: ${req.mongoUser.email}`);
-
-      const updateData = req.body;
-
-      if (mongoose.connection.readyState === 1) {
-        // Check if card belongs to vendor
-        const card = await Ticket.findOne({
-          _id: id,
-          vendorId: req.mongoUser.uid,
-        });
-
-        if (!card) {
-          return res.status(404).json({
-            success: false,
-            message: "Card not found or access denied",
-          });
-        }
-
-        // Update card
-        Object.assign(card, updateData);
-        card.updatedAt = new Date();
-        await card.save();
-
-        console.log(`✅ Card updated: ${card.title}`);
-
-        res.json({
-          success: true,
-          message: "Card updated successfully",
-          data: { card },
-        });
-      } else {
-        // Mock response
-        console.log("⚠️ Mock: Card would be updated if DB connected");
-
-        res.json({
-          success: true,
-          message: "Mock: Card updated successfully",
-          data: {
-            card: {
-              _id: id,
-              ...updateData,
-              updatedAt: new Date(),
-            },
-          },
-        });
-      }
-    } catch (error) {
-      console.error("Error updating card:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error updating card",
-      });
-    }
-  },
-);
-
-// Delete vendor card
-app.delete(
-  "/api/vendor/cards/:id",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log(`🗑️ Deleting vendor card ${id}`);
-
-      if (mongoose.connection.readyState === 1) {
-        // Check if card belongs to vendor
-        const card = await Ticket.findById(id);
-
-        if (!card) {
-          return res.status(404).json({
-            success: false,
-            message: "Card not found",
-          });
-        }
-
-        if (
-          card.vendorId !== req.mongoUser.uid &&
-          req.mongoUser.role !== "admin"
-        ) {
-          return res.status(403).json({
-            success: false,
-            message: "You don't have permission to delete this card",
-          });
-        }
-
-        // Delete the card
-        await Ticket.findByIdAndDelete(id);
-        console.log(`✅ Card deleted: ${card.title}`);
-      } else {
-        console.log("⚠️ Mock: Card would be deleted if DB connected");
-      }
-
-      res.json({
-        success: true,
-        message: "Card deleted successfully",
-      });
-    } catch (error) {
-      console.error("Error deleting card:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error deleting card",
-        error:
-          process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
-  },
+  }
 );
 
 // Get vendor's applications (bookings for vendor's cards)
 app.get(
   "/api/vendor/applications",
   firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
+  requireRole(["vendor"]),
   async (req, res) => {
     try {
       const { status = "all" } = req.query;
       console.log(
-        `📋 Vendor applications requested by: ${req.mongoUser.email}, status: ${status}`,
+        `📋 Vendor applications requested by: ${req.mongoUser.email}, status: ${status}`
       );
 
       let applications = [];
@@ -1963,7 +1463,7 @@ app.get(
 
         // Get vendor's cards
         const vendorCards = await Ticket.find({ vendorId: vendorId }).select(
-          "_id title price",
+          "_id title price"
         );
         const cardIds = vendorCards.map((card) => card._id);
 
@@ -2012,6 +1512,21 @@ app.get(
             quantity: 2,
             totalPrice: 100,
           },
+          {
+            _id: "app-2",
+            user: {
+              name: "Jane Smith",
+              email: "jane@example.com",
+            },
+            card: {
+              title: "Football Match - National Cup",
+              price: 30,
+            },
+            status: "approved",
+            createdAt: new Date(Date.now() - 172800000),
+            quantity: 1,
+            totalPrice: 30,
+          },
         ].filter((app) => status === "all" || app.status === status);
       }
 
@@ -2028,14 +1543,14 @@ app.get(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
+  }
 );
 
 // Approve/Reject application
 app.put(
   "/api/vendor/applications/:id/:action",
   firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
+  requireRole(["vendor"]),
   async (req, res) => {
     try {
       const { id, action } = req.params;
@@ -2058,7 +1573,7 @@ app.put(
         updatedApplication = await Booking.findByIdAndUpdate(
           id,
           { status: status, updatedAt: new Date() },
-          { new: true },
+          { new: true }
         );
 
         if (!updatedApplication) {
@@ -2074,11 +1589,11 @@ app.put(
           if (ticket) {
             ticket.availableQuantity = Math.max(
               0,
-              ticket.availableQuantity - updatedApplication.quantity,
+              ticket.availableQuantity - updatedApplication.quantity
             );
             await ticket.save();
             console.log(
-              `✅ Reduced available quantity for ticket ${ticket._id}`,
+              `✅ Reduced available quantity for ticket ${ticket._id}`
             );
           }
         }
@@ -2107,102 +1622,58 @@ app.put(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
+  }
 );
 
-// FIXED: Vendor profile endpoints
-app.get(
-  "/api/vendor/profile",
+// Delete vendor card
+app.delete(
+  "/api/vendor/cards/:id",
   firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
+  requireRole(["vendor"]),
   async (req, res) => {
     try {
-      console.log(`📋 Vendor profile requested by: ${req.mongoUser.email}`);
-
-      // Return user data with vendor-specific info
-      res.json({
-        success: true,
-        data: {
-          user: {
-            _id: req.mongoUser._id,
-            uid: req.mongoUser.uid,
-            name: req.mongoUser.name,
-            email: req.mongoUser.email,
-            photoURL: req.mongoUser.photoURL,
-            role: req.mongoUser.role,
-            emailVerified: req.mongoUser.emailVerified,
-            createdAt: req.mongoUser.createdAt,
-            updatedAt: req.mongoUser.updatedAt,
-            lastLogin: req.mongoUser.lastLogin,
-          },
-        },
-      });
-    } catch (error) {
-      console.error("Error fetching vendor profile:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching vendor profile",
-      });
-    }
-  },
-);
-
-app.put(
-  "/api/vendor/profile",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      console.log(`✏️ Updating vendor profile for: ${req.mongoUser.email}`);
-
-      const updateData = req.body;
+      const { id } = req.params;
+      console.log(`🗑️ Deleting vendor card ${id}`);
 
       if (mongoose.connection.readyState === 1) {
-        // Update user in database
-        const updatedUser = await User.findOneAndUpdate(
-          { _id: req.mongoUser._id },
-          updateData,
-          { new: true },
-        );
+        // Check if card belongs to vendor
+        const card = await Ticket.findById(id);
 
-        if (!updatedUser) {
+        if (!card) {
           return res.status(404).json({
             success: false,
-            message: "User not found",
+            message: "Card not found",
           });
         }
 
-        // Update req.mongoUser for current request
-        Object.assign(req.mongoUser, updateData);
+        if (card.vendorId !== req.mongoUser.uid) {
+          return res.status(403).json({
+            success: false,
+            message: "You don't have permission to delete this card",
+          });
+        }
 
-        console.log(`✅ Vendor profile updated for: ${updatedUser.email}`);
-
-        res.json({
-          success: true,
-          message: "Vendor profile updated successfully",
-          data: { user: updatedUser },
-        });
+        // Delete the card
+        await Ticket.findByIdAndDelete(id);
+        console.log(`✅ Card deleted: ${card.title}`);
       } else {
-        // Mock response
-        console.log("⚠️ Mock: Vendor profile would be updated if DB connected");
-
-        // Update mock user data
-        Object.assign(req.mongoUser, updateData);
-
-        res.json({
-          success: true,
-          message: "Mock: Vendor profile updated successfully",
-          data: { user: req.mongoUser },
-        });
+        console.log("⚠️ Mock: Card would be deleted if DB connected");
       }
+
+      res.json({
+        success: true,
+        message: "Card deleted successfully",
+      });
     } catch (error) {
-      console.error("Error updating vendor profile:", error);
+      console.error("Error deleting card:", error);
       res.status(500).json({
         success: false,
-        message: "Error updating vendor profile",
+        message: "Error deleting card",
+        error:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
+  }
 );
 
 // Submit vendor application
@@ -2360,370 +1831,7 @@ app.get(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
-);
-
-// FIXED: Vendor bookings management
-app.get(
-  "/api/vendor/bookings",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      const { status = "all" } = req.query;
-      console.log(`📋 Vendor bookings requested by: ${req.mongoUser.email}`);
-
-      let bookings = [];
-
-      if (mongoose.connection.readyState === 1) {
-        const vendorId = req.mongoUser.uid;
-
-        // Get vendor's cards
-        const vendorCards = await Ticket.find({ vendorId: vendorId }).select(
-          "_id",
-        );
-        const cardIds = vendorCards.map((card) => card._id);
-
-        // Build filter
-        let filter = { ticketId: { $in: cardIds } };
-        if (status !== "all") {
-          filter.status = status;
-        }
-
-        // Get bookings
-        bookings = await Booking.find(filter)
-          .sort({ createdAt: -1 })
-          .populate("ticketId", "title from to departureAt price");
-      } else {
-        // Mock data
-        bookings = [
-          {
-            _id: "vendor-booking-1",
-            ticketId: {
-              _id: "ticket-1",
-              title: "Dhaka to Chittagong AC Bus",
-              from: "Dhaka",
-              to: "Chittagong",
-              price: 1200,
-              departureAt: new Date(Date.now() + 86400000),
-            },
-            userName: "John Doe",
-            userEmail: "john@example.com",
-            quantity: 2,
-            totalPrice: 2400,
-            status: "pending",
-            bookingReference: "VBK-001",
-            createdAt: new Date(),
-          },
-        ].filter((b) => status === "all" || b.status === status);
-      }
-
-      res.json({
-        success: true,
-        data: { bookings },
-      });
-    } catch (error) {
-      console.error("Error fetching vendor bookings:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching vendor bookings",
-      });
-    }
-  },
-);
-
-// Accept booking (vendor)
-app.put(
-  "/api/vendor/bookings/:id/accept",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log(`✅ Vendor accepting booking ${id}`);
-
-      let updatedBooking = null;
-
-      if (mongoose.connection.readyState === 1) {
-        updatedBooking = await Booking.findByIdAndUpdate(
-          id,
-          { status: "confirmed", updatedAt: new Date() },
-          { new: true },
-        );
-
-        if (!updatedBooking) {
-          return res.status(404).json({
-            success: false,
-            message: "Booking not found",
-          });
-        }
-      } else {
-        // Mock response
-        updatedBooking = {
-          _id: id,
-          status: "confirmed",
-          updatedAt: new Date(),
-        };
-      }
-
-      res.json({
-        success: true,
-        message: "Booking accepted successfully",
-        data: { booking: updatedBooking },
-      });
-    } catch (error) {
-      console.error("Error accepting booking:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error accepting booking",
-      });
-    }
-  },
-);
-
-// Reject booking (vendor)
-app.put(
-  "/api/vendor/bookings/:id/reject",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log(`❌ Vendor rejecting booking ${id}`);
-
-      let updatedBooking = null;
-
-      if (mongoose.connection.readyState === 1) {
-        updatedBooking = await Booking.findByIdAndUpdate(
-          id,
-          { status: "cancelled", updatedAt: new Date() },
-          { new: true },
-        );
-
-        if (!updatedBooking) {
-          return res.status(404).json({
-            success: false,
-            message: "Booking not found",
-          });
-        }
-      } else {
-        // Mock response
-        updatedBooking = {
-          _id: id,
-          status: "cancelled",
-          updatedAt: new Date(),
-        };
-      }
-
-      res.json({
-        success: true,
-        message: "Booking rejected successfully",
-        data: { booking: updatedBooking },
-      });
-    } catch (error) {
-      console.error("Error rejecting booking:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error rejecting booking",
-      });
-    }
-  },
-);
-
-// Update vendor booking status
-app.put(
-  "/api/vendor/bookings/:bookingId/status",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      const { bookingId } = req.params;
-      const { status } = req.body;
-
-      console.log(
-        `📝 Updating vendor booking ${bookingId} status to: ${status}`,
-      );
-
-      if (
-        !["pending", "confirmed", "cancelled", "completed"].includes(status)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid status",
-        });
-      }
-
-      let updatedBooking = null;
-
-      if (mongoose.connection.readyState === 1) {
-        updatedBooking = await Booking.findByIdAndUpdate(
-          bookingId,
-          { status: status, updatedAt: new Date() },
-          { new: true },
-        );
-
-        if (!updatedBooking) {
-          return res.status(404).json({
-            success: false,
-            message: "Booking not found",
-          });
-        }
-      } else {
-        // Mock response
-        updatedBooking = {
-          _id: bookingId,
-          status: status,
-          updatedAt: new Date(),
-        };
-      }
-
-      res.json({
-        success: true,
-        message: `Booking status updated to ${status}`,
-        data: { booking: updatedBooking },
-      });
-    } catch (error) {
-      console.error("Error updating booking status:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error updating booking status",
-      });
-    }
-  },
-);
-
-// FIXED: Vendor revenue endpoints
-app.get(
-  "/api/vendor/revenue",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      console.log(`💰 Vendor revenue requested by: ${req.mongoUser.email}`);
-
-      let revenueData = {
-        totalRevenue: 0,
-        pending: 0,
-        available: 0,
-        thisMonth: 0,
-        lastMonth: 0,
-      };
-
-      if (mongoose.connection.readyState === 1) {
-        const vendorId = req.mongoUser.uid;
-
-        // Get vendor's cards
-        const vendorCards = await Ticket.find({ vendorId: vendorId }).select(
-          "_id",
-        );
-        const cardIds = vendorCards.map((card) => card._id);
-
-        // Get all bookings for vendor's cards
-        const allBookings = await Booking.find({
-          ticketId: { $in: cardIds },
-          status: { $in: ["confirmed", "completed"] },
-        });
-
-        // Calculate total revenue
-        revenueData.totalRevenue = allBookings.reduce(
-          (sum, booking) => sum + (booking.totalPrice || 0),
-          0,
-        );
-
-        // Get pending bookings
-        const pendingBookings = await Booking.find({
-          ticketId: { $in: cardIds },
-          status: "pending",
-        });
-        revenueData.pending = pendingBookings.reduce(
-          (sum, booking) => sum + (booking.totalPrice || 0),
-          0,
-        );
-
-        // Available = total - pending
-        revenueData.available = revenueData.totalRevenue - revenueData.pending;
-
-        // Calculate this month and last month revenue
-        const now = new Date();
-        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const lastMonthStart = new Date(
-          now.getFullYear(),
-          now.getMonth() - 1,
-          1,
-        );
-        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-
-        const thisMonthBookings = await Booking.find({
-          ticketId: { $in: cardIds },
-          status: { $in: ["confirmed", "completed"] },
-          createdAt: { $gte: thisMonthStart },
-        });
-        revenueData.thisMonth = thisMonthBookings.reduce(
-          (sum, booking) => sum + (booking.totalPrice || 0),
-          0,
-        );
-
-        const lastMonthBookings = await Booking.find({
-          ticketId: { $in: cardIds },
-          status: { $in: ["confirmed", "completed"] },
-          createdAt: { $gte: lastMonthStart, $lte: lastMonthEnd },
-        });
-        revenueData.lastMonth = lastMonthBookings.reduce(
-          (sum, booking) => sum + (booking.totalPrice || 0),
-          0,
-        );
-      } else {
-        // Mock data
-        revenueData = {
-          totalRevenue: 12500,
-          pending: 1500,
-          available: 11000,
-          thisMonth: 4500,
-          lastMonth: 4000,
-        };
-      }
-
-      res.json({
-        success: true,
-        data: revenueData,
-      });
-    } catch (error) {
-      console.error("Error fetching vendor revenue:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching revenue data",
-      });
-    }
-  },
-);
-
-// FIXED: Add other vendor endpoints
-app.get(
-  "/api/vendor/earnings",
-  firebaseAuthMiddleware,
-  requireRole(["vendor", "admin"]),
-  async (req, res) => {
-    try {
-      console.log(`💰 Vendor earnings requested by: ${req.mongoUser.email}`);
-
-      // For now, return same as revenue
-      const revenueResponse = await requireRole(["vendor", "admin"])(
-        req,
-        res,
-        () => {},
-      );
-      if (!res.headersSent) {
-        // If middleware didn't send response, continue
-        return res.redirect(307, "/api/vendor/revenue");
-      }
-    } catch (error) {
-      console.error("Error in vendor earnings:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching earnings",
-      });
-    }
-  },
+  }
 );
 
 // Review vendor application (Admin only)
@@ -2769,13 +1877,13 @@ app.put(
             reviewedBy: req.mongoUser._id,
             updatedAt: new Date(),
           },
-          { new: true },
+          { new: true }
         );
 
         // If approved, update user role to vendor
         if (status === "approved") {
           console.log(
-            `🔄 Updating user role to vendor for: ${application.userEmail}`,
+            `🔄 Updating user role to vendor for: ${application.userEmail}`
           );
 
           // Find user by email first
@@ -2792,7 +1900,7 @@ app.put(
             console.log(`✅ User ${userToUpdate.email} role updated to vendor`);
           } else {
             console.log(
-              `⚠️ User not found for application: ${application.userEmail}`,
+              `⚠️ User not found for application: ${application.userEmail}`
             );
             // Create user if not found
             const newUser = new User({
@@ -2819,7 +1927,7 @@ app.put(
         };
 
         console.log(
-          "⚠️ Mock: Vendor application would be reviewed if DB connected",
+          "⚠️ Mock: Vendor application would be reviewed if DB connected"
         );
       }
 
@@ -2837,10 +1945,10 @@ app.put(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
+  }
 );
 
-// ========== FIXED: DEBUG & UTILITY ROUTES ==========
+// ========== DEBUG & UTILITY ROUTES ==========
 // Token debugging endpoint
 app.post("/api/debug/token-check", async (req, res) => {
   try {
@@ -2924,9 +2032,7 @@ app.get("/api/debug/auth-check", firebaseAuthMiddleware, async (req, res) => {
           authorization: req.headers.authorization ? "Present" : "Missing",
         },
         isAdmin: req.mongoUser.role === "admin",
-        adminEmailCheck:
-          req.mongoUser.email === "mahdiashan9@gmail.com" ||
-          req.mongoUser.email === "islameshan451@gmail.com",
+        adminEmailCheck: req.mongoUser.email === "mahdiashan9@gmail.com",
       },
     });
   } catch (error) {
@@ -2947,7 +2053,7 @@ app.post(
         const updatedUser = await User.findOneAndUpdate(
           { email: req.mongoUser.email },
           { role: "admin" },
-          { new: true },
+          { new: true }
         );
 
         res.json({
@@ -2964,7 +2070,7 @@ app.post(
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
-  },
+  }
 );
 
 // Debug: Force sync with MongoDB user
@@ -3108,7 +2214,7 @@ app.post("/api/debug/approve-all", async (req, res) => {
     if (mongoose.connection.readyState === 1) {
       const result = await Ticket.updateMany(
         {},
-        { verified: "approved", isActive: true },
+        { verified: "approved", isActive: true }
       );
       res.json({
         success: true,
@@ -3200,10 +2306,10 @@ app.get(
         isAdmin: true,
       },
     });
-  },
+  }
 );
 
-// ========== FIXED: ADMIN ROUTES ==========
+// ========== ADMIN ROUTES ==========
 // Admin dashboard
 app.get(
   "/api/admin/dashboard",
@@ -3212,7 +2318,7 @@ app.get(
   async (req, res) => {
     try {
       console.log(
-        `📊 Admin dashboard accessed by: ${req.mongoUser.email} (${req.mongoUser.role})`,
+        `📊 Admin dashboard accessed by: ${req.mongoUser.email} (${req.mongoUser.role})`
       );
 
       let totalUsers = 0;
@@ -3269,7 +2375,7 @@ app.get(
         message: "Error fetching dashboard data",
       });
     }
-  },
+  }
 );
 
 // Admin users management
@@ -3372,7 +2478,7 @@ app.get(
         message: "Error fetching users",
       });
     }
-  },
+  }
 );
 
 // Update user role
@@ -3395,7 +2501,7 @@ app.put(
         const user = await User.findByIdAndUpdate(
           req.params.id,
           { role },
-          { new: true },
+          { new: true }
         );
 
         if (!user) {
@@ -3432,89 +2538,7 @@ app.put(
         message: "Error updating user role",
       });
     }
-  },
-);
-
-// FIXED: Suspend user
-app.put(
-  "/api/admin/users/:userId/suspend",
-  firebaseAuthMiddleware,
-  requireRole(["admin"]),
-  async (req, res) => {
-    try {
-      const { userId } = req.params;
-
-      if (mongoose.connection.readyState === 1) {
-        // In a real app, you would have a 'suspended' field
-        // For now, we'll just return success
-        const user = await User.findById(userId);
-
-        if (!user) {
-          return res.status(404).json({
-            success: false,
-            message: "User not found",
-          });
-        }
-
-        res.json({
-          success: true,
-          message: `User ${user.email} suspended`,
-          data: { user },
-        });
-      } else {
-        res.json({
-          success: true,
-          message: "Mock: User would be suspended if DB connected",
-        });
-      }
-    } catch (error) {
-      console.error("Error suspending user:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error suspending user",
-      });
-    }
-  },
-);
-
-// FIXED: Activate user
-app.put(
-  "/api/admin/users/:userId/activate",
-  firebaseAuthMiddleware,
-  requireRole(["admin"]),
-  async (req, res) => {
-    try {
-      const { userId } = req.params;
-
-      if (mongoose.connection.readyState === 1) {
-        const user = await User.findById(userId);
-
-        if (!user) {
-          return res.status(404).json({
-            success: false,
-            message: "User not found",
-          });
-        }
-
-        res.json({
-          success: true,
-          message: `User ${user.email} activated`,
-          data: { user },
-        });
-      } else {
-        res.json({
-          success: true,
-          message: "Mock: User would be activated if DB connected",
-        });
-      }
-    } catch (error) {
-      console.error("Error activating user:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error activating user",
-      });
-    }
-  },
+  }
 );
 
 // Admin tickets management
@@ -3574,7 +2598,7 @@ app.get(
             createdAt: new Date().toISOString(),
           },
         ].filter(
-          (ticket) => verified === "all" || ticket.verified === verified,
+          (ticket) => verified === "all" || ticket.verified === verified
         );
 
         total = tickets.length;
@@ -3606,7 +2630,7 @@ app.get(
         message: "Error fetching tickets",
       });
     }
-  },
+  }
 );
 
 // Verify/Reject ticket
@@ -3632,7 +2656,7 @@ app.put(
             verified: status,
             isActive: status === "approved",
           },
-          { new: true },
+          { new: true }
         );
 
         if (!ticket) {
@@ -3669,7 +2693,7 @@ app.put(
         message: "Error updating ticket",
       });
     }
-  },
+  }
 );
 
 // Admin vendor applications
@@ -3757,7 +2781,7 @@ app.get(
         message: "Error fetching applications",
       });
     }
-  },
+  }
 );
 
 // Get single vendor application by ID (Admin)
@@ -3811,10 +2835,10 @@ app.get(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
+  }
 );
 
-// ========== FIXED: ADMIN BOOKINGS ENDPOINTS ==========
+// ========== ADMIN BOOKINGS ENDPOINTS ==========
 // GET /api/admin/bookings - Get all bookings for admin panel
 app.get(
   "/api/admin/bookings",
@@ -3940,6 +2964,26 @@ app.get(
             createdAt: new Date(Date.now() - 86400000),
             updatedAt: new Date(Date.now() - 86400000),
           },
+          {
+            _id: "booking-002",
+            userId: "user-002",
+            userName: "Jane Smith",
+            userEmail: "jane@example.com",
+            ticketId: {
+              _id: "ticket-002",
+              title: "Dhaka to Sylhet Train",
+              from: "Dhaka",
+              to: "Sylhet",
+              departureAt: new Date(Date.now() + 172800000),
+            },
+            ticketTitle: "Dhaka to Sylhet Train",
+            quantity: 1,
+            totalPrice: 1800,
+            status: "confirmed",
+            bookingReference: "BK-20240101-002",
+            createdAt: new Date(Date.now() - 43200000),
+            updatedAt: new Date(Date.now() - 43200000),
+          },
         ];
 
         total = bookings.length;
@@ -3975,10 +3019,113 @@ app.get(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
+  }
 );
 
-// GET /api/admin/bookings/:id - Get single booking details for admin
+// PUT /api/admin/bookings/:id/status - Update booking status
+app.put(
+  "/api/admin/bookings/:id/status",
+  firebaseAuthMiddleware,
+  requireRole(["admin"]),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      console.log(`📝 Updating booking ${id} status to: ${status}`);
+
+      if (
+        !["pending", "confirmed", "cancelled", "completed"].includes(status)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid status. Must be: pending, confirmed, cancelled, or completed",
+        });
+      }
+
+      let updatedBooking = null;
+
+      if (mongoose.connection.readyState === 1) {
+        // Find and update booking
+        updatedBooking = await Booking.findByIdAndUpdate(
+          id,
+          {
+            status: status,
+            updatedAt: new Date(),
+          },
+          { new: true }
+        );
+
+        if (!updatedBooking) {
+          return res.status(404).json({
+            success: false,
+            message: "Booking not found",
+          });
+        }
+
+        console.log(`✅ Booking ${id} updated to: ${status}`);
+
+        // If confirming booking, reduce available quantity on ticket
+        if (status === "confirmed" && updatedBooking.ticketId) {
+          const ticket = await Ticket.findById(updatedBooking.ticketId);
+          if (ticket) {
+            const newAvailable = Math.max(
+              0,
+              ticket.availableQuantity - updatedBooking.quantity
+            );
+            ticket.availableQuantity = newAvailable;
+            await ticket.save();
+            console.log(
+              `✅ Reduced available quantity for ticket ${ticket._id} to ${newAvailable}`
+            );
+          }
+        }
+
+        // If cancelling a confirmed booking, restore ticket quantity
+        if (status === "cancelled" && updatedBooking.ticketId) {
+          const previousBooking = await Booking.findById(id);
+          if (previousBooking && previousBooking.status === "confirmed") {
+            const ticket = await Ticket.findById(updatedBooking.ticketId);
+            if (ticket) {
+              ticket.availableQuantity = Math.min(
+                ticket.quantity,
+                ticket.availableQuantity + previousBooking.quantity
+              );
+              await ticket.save();
+              console.log(`✅ Restored quantity for ticket ${ticket._id}`);
+            }
+          }
+        }
+      } else {
+        // Mock response
+        updatedBooking = {
+          _id: id,
+          status: status,
+          updatedAt: new Date(),
+        };
+
+        console.log("⚠️ Mock: Booking would be updated if DB connected");
+      }
+
+      res.json({
+        success: true,
+        message: `Booking status updated to ${status}`,
+        data: { booking: updatedBooking },
+      });
+    } catch (error) {
+      console.error("Error updating booking status:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error updating booking status",
+        error:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+// GET /api/admin/bookings/:id - Get single booking details
 app.get(
   "/api/admin/bookings/:id",
   firebaseAuthMiddleware,
@@ -3992,7 +3139,7 @@ app.get(
       if (mongoose.connection.readyState === 1) {
         booking = await Booking.findById(id).populate(
           "ticketId",
-          "title from to departureAt transportType price vendorName",
+          "title from to departureAt transportType price vendorName"
         );
 
         if (!booking) {
@@ -4041,373 +3188,7 @@ app.get(
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
-  },
-);
-
-// FIXED: Alias for getBookingDetails
-app.get(
-  "/api/admin/bookings/:bookingId",
-  firebaseAuthMiddleware,
-  requireRole(["admin"]),
-  async (req, res) => {
-    try {
-      // Redirect to the admin booking by ID endpoint
-      return res.redirect(307, `/api/admin/bookings/${req.params.bookingId}`);
-    } catch (error) {
-      console.error("Error in booking details alias:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching booking details",
-      });
-    }
-  },
-);
-
-// PUT /api/admin/bookings/:id/status - Update booking status
-app.put(
-  "/api/admin/bookings/:id/status",
-  firebaseAuthMiddleware,
-  requireRole(["admin"]),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { status } = req.body;
-
-      console.log(`📝 Updating booking ${id} status to: ${status}`);
-
-      if (
-        !["pending", "confirmed", "cancelled", "completed"].includes(status)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid status. Must be: pending, confirmed, cancelled, or completed",
-        });
-      }
-
-      let updatedBooking = null;
-
-      if (mongoose.connection.readyState === 1) {
-        // Find and update booking
-        updatedBooking = await Booking.findByIdAndUpdate(
-          id,
-          {
-            status: status,
-            updatedAt: new Date(),
-          },
-          { new: true },
-        );
-
-        if (!updatedBooking) {
-          return res.status(404).json({
-            success: false,
-            message: "Booking not found",
-          });
-        }
-
-        console.log(`✅ Booking ${id} updated to: ${status}`);
-
-        // If confirming booking, reduce available quantity on ticket
-        if (status === "confirmed" && updatedBooking.ticketId) {
-          const ticket = await Ticket.findById(updatedBooking.ticketId);
-          if (ticket) {
-            const newAvailable = Math.max(
-              0,
-              ticket.availableQuantity - updatedBooking.quantity,
-            );
-            ticket.availableQuantity = newAvailable;
-            await ticket.save();
-            console.log(
-              `✅ Reduced available quantity for ticket ${ticket._id} to ${newAvailable}`,
-            );
-          }
-        }
-
-        // If cancelling a confirmed booking, restore ticket quantity
-        if (status === "cancelled" && updatedBooking.ticketId) {
-          const previousBooking = await Booking.findById(id);
-          if (previousBooking && previousBooking.status === "confirmed") {
-            const ticket = await Ticket.findById(updatedBooking.ticketId);
-            if (ticket) {
-              ticket.availableQuantity = Math.min(
-                ticket.quantity,
-                ticket.availableQuantity + previousBooking.quantity,
-              );
-              await ticket.save();
-              console.log(`✅ Restored quantity for ticket ${ticket._id}`);
-            }
-          }
-        }
-      } else {
-        // Mock response
-        updatedBooking = {
-          _id: id,
-          status: status,
-          updatedAt: new Date(),
-        };
-
-        console.log("⚠️ Mock: Booking would be updated if DB connected");
-      }
-
-      res.json({
-        success: true,
-        message: `Booking status updated to ${status}`,
-        data: { booking: updatedBooking },
-      });
-    } catch (error) {
-      console.error("Error updating booking status:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error updating booking status",
-        error:
-          process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
-  },
-);
-
-// FIXED: Add missing admin endpoints
-app.get(
-  "/api/admin/reports",
-  firebaseAuthMiddleware,
-  requireRole(["admin"]),
-  async (req, res) => {
-    try {
-      console.log(`📊 Admin reports requested by: ${req.mongoUser.email}`);
-
-      // Return basic report data
-      res.json({
-        success: true,
-        data: {
-          reports: [
-            { id: 1, name: "Monthly Sales", type: "sales", period: "2024-01" },
-            { id: 2, name: "User Activity", type: "users", period: "2024-01" },
-            {
-              id: 3,
-              name: "Vendor Performance",
-              type: "vendors",
-              period: "2024-01",
-            },
-          ],
-        },
-      });
-    } catch (error) {
-      console.error("Error fetching reports:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching reports",
-      });
-    }
-  },
-);
-
-// FIXED: Add missing payment endpoints (simplified)
-app.post("/api/payments", firebaseAuthMiddleware, async (req, res) => {
-  try {
-    console.log(`💳 Payment initiated by: ${req.mongoUser.email}`);
-
-    const { amount, bookingId, paymentMethod } = req.body;
-
-    if (!amount || !bookingId) {
-      return res.status(400).json({
-        success: false,
-        message: "Amount and booking ID are required",
-      });
-    }
-
-    // Simulate payment processing
-    const paymentId = `PAY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-    res.json({
-      success: true,
-      message: "Payment initiated successfully",
-      data: {
-        paymentId,
-        status: "pending",
-        amount,
-        bookingId,
-      },
-    });
-  } catch (error) {
-    console.error("Error processing payment:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error processing payment",
-    });
   }
-});
-
-app.post(
-  "/api/payments/:paymentId/verify",
-  firebaseAuthMiddleware,
-  async (req, res) => {
-    try {
-      const { paymentId } = req.params;
-      console.log(`✅ Verifying payment: ${paymentId}`);
-
-      // Simulate payment verification
-      res.json({
-        success: true,
-        message: "Payment verified successfully",
-        data: {
-          paymentId,
-          status: "completed",
-          verifiedAt: new Date(),
-        },
-      });
-    } catch (error) {
-      console.error("Error verifying payment:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error verifying payment",
-      });
-    }
-  },
-);
-
-app.get("/api/payment-methods", firebaseAuthMiddleware, async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      data: {
-        methods: [
-          { id: "bkash", name: "bKash", icon: "💳" },
-          { id: "nagad", name: "Nagad", icon: "💰" },
-          { id: "card", name: "Credit/Debit Card", icon: "💳" },
-          { id: "bank", name: "Bank Transfer", icon: "🏦" },
-        ],
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching payment methods:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching payment methods",
-    });
-  }
-});
-
-app.get(
-  "/api/payments/:paymentId/status",
-  firebaseAuthMiddleware,
-  async (req, res) => {
-    try {
-      const { paymentId } = req.params;
-
-      res.json({
-        success: true,
-        data: {
-          paymentId,
-          status: "completed",
-          amount: 1000,
-          currency: "BDT",
-          timestamp: new Date(),
-        },
-      });
-    } catch (error) {
-      console.error("Error fetching payment status:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching payment status",
-      });
-    }
-  },
-);
-
-// FIXED: Process payment for booking
-app.post(
-  "/api/bookings/:bookingId/pay",
-  firebaseAuthMiddleware,
-  async (req, res) => {
-    try {
-      const { bookingId } = req.params;
-      const { paymentMethod, transactionId } = req.body;
-
-      console.log(`💳 Processing payment for booking: ${bookingId}`);
-
-      if (!paymentMethod) {
-        return res.status(400).json({
-          success: false,
-          message: "Payment method is required",
-        });
-      }
-
-      let updatedBooking = null;
-
-      if (mongoose.connection.readyState === 1) {
-        // Find booking
-        const booking = await Booking.findOne({
-          _id: bookingId,
-          userId: req.mongoUser.uid,
-        });
-
-        if (!booking) {
-          return res.status(404).json({
-            success: false,
-            message: "Booking not found or access denied",
-          });
-        }
-
-        // Update booking with payment info
-        booking.status = "confirmed";
-        // In a real app, you would have payment fields
-        booking.updatedAt = new Date();
-        await booking.save();
-
-        updatedBooking = booking;
-      } else {
-        // Mock response
-        updatedBooking = {
-          _id: bookingId,
-          status: "confirmed",
-          updatedAt: new Date(),
-        };
-      }
-
-      res.json({
-        success: true,
-        message: "Payment processed successfully",
-        data: { booking: updatedBooking },
-      });
-    } catch (error) {
-      console.error("Error processing payment:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error processing payment",
-      });
-    }
-  },
-);
-
-// FIXED: Download ticket
-app.get(
-  "/api/bookings/:bookingId/download",
-  firebaseAuthMiddleware,
-  async (req, res) => {
-    try {
-      const { bookingId } = req.params;
-      console.log(`🎫 Downloading ticket for booking: ${bookingId}`);
-
-      // In a real app, this would generate a PDF ticket
-      // For now, return mock data
-
-      res.json({
-        success: true,
-        data: {
-          bookingId,
-          ticketUrl: `https://ticketbari.com/tickets/${bookingId}`,
-          downloadUrl: `/api/bookings/${bookingId}/ticket.pdf`,
-          message: "Ticket generated successfully",
-        },
-      });
-    } catch (error) {
-      console.error("Error downloading ticket:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error downloading ticket",
-      });
-    }
-  },
 );
 
 // ========= ERROR HANDLERS =========
@@ -4435,7 +3216,7 @@ app.use((err, req, res, next) => {
 // ========== EXPORT FOR VERCEL ==========
 module.exports = app;
 
-// ========== FIXED: LOCAL DEVELOPMENT SERVER START ==========
+// ========== LOCAL DEVELOPMENT SERVER START ==========
 // Only start the server if we're not in a Vercel environment
 if (require.main === module) {
   const PORT = process.env.PORT || 5000;
@@ -4445,30 +3226,16 @@ if (require.main === module) {
     console.log("=".repeat(70));
     console.log(`📡 Server URL: http://localhost:${PORT}`);
     console.log(
-      `🔐 Auth Mode: ${firebaseInitialized ? "Firebase Admin" : "Mock Authentication"}`,
+      `🔐 Auth Mode: ${
+        firebaseInitialized ? "Firebase Admin" : "Mock Authentication"
+      }`
     );
     console.log(
-      `🗄️  Database: ${mongoose.connection.readyState === 1 ? "Connected" : "Disconnected"}`,
+      `🗄️  Database: ${
+        mongoose.connection.readyState === 1 ? "Connected" : "Disconnected"
+      }`
     );
-    console.log(
-      `👑 Admin Emails: mahdiashan9@gmail.com, islameshan451@gmail.com`,
-    );
-    console.log(
-      `🌐 CORS Enabled for: https://ticketbari-projects.web.app, http://localhost:5173`,
-    );
-    console.log("=".repeat(70));
-    console.log("📋 Available endpoints:");
-    console.log("  GET  /api/health - Health check");
-    console.log("  GET  /api/tickets - Public tickets");
-    console.log("  GET  /api/user/profile - User profile (requires auth)");
-    console.log("  GET  /api/user/bookings - User bookings (requires auth)");
-    console.log("  POST /api/bookings - Create booking (requires auth)");
-    console.log(
-      "  GET  /api/vendor/cards - Vendor cards (requires vendor/admin)",
-    );
-    console.log(
-      "  GET  /api/admin/dashboard - Admin dashboard (requires admin)",
-    );
+    console.log(`👑 Admin Email: mahdiashan9@gmail.com`);
     console.log("=".repeat(70));
   });
 }
